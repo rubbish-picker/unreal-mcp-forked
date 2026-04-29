@@ -8,6 +8,14 @@ Editor tools allow you to control the Unreal Editor viewport and other editor fu
 
 ## Editor Tools
 
+### list_unreal_mcp_commands
+
+List the commands supported by the Unreal-side MCP bridge. Use this first when chat context is lost, when the Python MCP tool list may be stale, or after adding new plugin commands.
+
+**Returns:**
+- `commands` - Array of command names, categories, and descriptions
+- `command_count` - Number of registered Unreal-side commands
+
 ### inspect_object_properties
 
 Inspect Details-style properties for an object, actor, actor component, or Blueprint class default object.

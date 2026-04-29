@@ -43,6 +43,7 @@ public:
 
 	// Command execution
 	FString ExecuteCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
+	TSharedPtr<FJsonObject> GetCommandCatalog() const;
 
 private:
 	// Server state

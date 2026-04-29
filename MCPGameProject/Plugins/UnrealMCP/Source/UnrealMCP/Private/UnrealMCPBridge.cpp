@@ -80,6 +80,79 @@ UUnrealMCPBridge::~UUnrealMCPBridge()
     UMGCommands.Reset();
 }
 
+TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
+{
+    auto MakeCommand = [](const FString& Name, const FString& Category, const FString& Description)
+    {
+        TSharedPtr<FJsonObject> CommandObj = MakeShared<FJsonObject>();
+        CommandObj->SetStringField(TEXT("name"), Name);
+        CommandObj->SetStringField(TEXT("category"), Category);
+        CommandObj->SetStringField(TEXT("description"), Description);
+        return MakeShared<FJsonValueObject>(CommandObj);
+    };
+
+    TArray<TSharedPtr<FJsonValue>> Commands;
+    Commands.Add(MakeCommand(TEXT("ping"), TEXT("system"), TEXT("Check whether the Unreal MCP bridge is alive.")));
+    Commands.Add(MakeCommand(TEXT("list_mcp_commands"), TEXT("system"), TEXT("Return the self-describing command catalog.")));
+
+    Commands.Add(MakeCommand(TEXT("get_actors_in_level"), TEXT("editor"), TEXT("List actors in the current editor level.")));
+    Commands.Add(MakeCommand(TEXT("find_actors_by_name"), TEXT("editor"), TEXT("Find actors by name substring.")));
+    Commands.Add(MakeCommand(TEXT("spawn_actor"), TEXT("editor"), TEXT("Spawn a basic engine actor in the current level.")));
+    Commands.Add(MakeCommand(TEXT("delete_actor"), TEXT("editor"), TEXT("Delete an actor by name.")));
+    Commands.Add(MakeCommand(TEXT("set_actor_transform"), TEXT("editor"), TEXT("Set actor location, rotation, or scale.")));
+    Commands.Add(MakeCommand(TEXT("get_actor_properties"), TEXT("editor"), TEXT("Get detailed actor data.")));
+    Commands.Add(MakeCommand(TEXT("set_actor_property"), TEXT("editor"), TEXT("Set a property on a level actor.")));
+    Commands.Add(MakeCommand(TEXT("inspect_object_properties"), TEXT("editor"), TEXT("Inspect Details-style properties for an object, actor, component, or Blueprint CDO.")));
+    Commands.Add(MakeCommand(TEXT("inspect_selected_objects"), TEXT("editor"), TEXT("Inspect currently selected editor objects.")));
+    Commands.Add(MakeCommand(TEXT("inspect_component_collision"), TEXT("editor"), TEXT("Inspect primitive component collision settings on an actor.")));
+    Commands.Add(MakeCommand(TEXT("find_asset_references"), TEXT("editor"), TEXT("Find asset referencers and dependencies.")));
+    Commands.Add(MakeCommand(TEXT("spawn_blueprint_actor"), TEXT("editor"), TEXT("Spawn an actor from a Blueprint.")));
+    Commands.Add(MakeCommand(TEXT("open_level"), TEXT("editor"), TEXT("Open an editor level by package path or filename.")));
+    Commands.Add(MakeCommand(TEXT("save_current_level"), TEXT("editor"), TEXT("Save the currently open editor level.")));
+    Commands.Add(MakeCommand(TEXT("focus_viewport"), TEXT("editor"), TEXT("Focus the active viewport.")));
+    Commands.Add(MakeCommand(TEXT("take_screenshot"), TEXT("editor"), TEXT("Capture the active viewport to a PNG file.")));
+
+    Commands.Add(MakeCommand(TEXT("create_blueprint"), TEXT("blueprint"), TEXT("Create a Blueprint asset.")));
+    Commands.Add(MakeCommand(TEXT("add_component_to_blueprint"), TEXT("blueprint"), TEXT("Add a component template to a Blueprint.")));
+    Commands.Add(MakeCommand(TEXT("set_component_property"), TEXT("blueprint"), TEXT("Set a Blueprint component template property.")));
+    Commands.Add(MakeCommand(TEXT("set_physics_properties"), TEXT("blueprint"), TEXT("Set common physics properties on a component template.")));
+    Commands.Add(MakeCommand(TEXT("compile_blueprint"), TEXT("blueprint"), TEXT("Compile a Blueprint.")));
+    Commands.Add(MakeCommand(TEXT("set_blueprint_property"), TEXT("blueprint"), TEXT("Set a Blueprint class default property.")));
+    Commands.Add(MakeCommand(TEXT("set_static_mesh_properties"), TEXT("blueprint"), TEXT("Set static mesh asset on a component template.")));
+    Commands.Add(MakeCommand(TEXT("set_pawn_properties"), TEXT("blueprint"), TEXT("Set common Pawn defaults.")));
+    Commands.Add(MakeCommand(TEXT("inspect_blueprint_components"), TEXT("blueprint"), TEXT("Inspect Blueprint component tree, template properties, and collision.")));
+    Commands.Add(MakeCommand(TEXT("inspect_blueprint_defaults"), TEXT("blueprint"), TEXT("Inspect Blueprint CDO defaults.")));
+    Commands.Add(MakeCommand(TEXT("inspect_blueprint_timelines"), TEXT("blueprint"), TEXT("Inspect Timeline templates, tracks, curves, and keyframes.")));
+
+    Commands.Add(MakeCommand(TEXT("connect_blueprint_nodes"), TEXT("blueprint_node"), TEXT("Connect two Blueprint graph pins.")));
+    Commands.Add(MakeCommand(TEXT("add_blueprint_get_self_component_reference"), TEXT("blueprint_node"), TEXT("Add a self component reference node.")));
+    Commands.Add(MakeCommand(TEXT("add_blueprint_self_reference"), TEXT("blueprint_node"), TEXT("Add a self reference node.")));
+    Commands.Add(MakeCommand(TEXT("find_blueprint_nodes"), TEXT("blueprint_node"), TEXT("Find Blueprint nodes by type and event name.")));
+    Commands.Add(MakeCommand(TEXT("inspect_blueprint_graph"), TEXT("blueprint_node"), TEXT("Inspect Blueprint graph nodes, pins, and links.")));
+    Commands.Add(MakeCommand(TEXT("remove_blueprint_nodes"), TEXT("blueprint_node"), TEXT("Remove Blueprint graph nodes by GUID.")));
+    Commands.Add(MakeCommand(TEXT("add_blueprint_event_node"), TEXT("blueprint_node"), TEXT("Add a Blueprint event node.")));
+    Commands.Add(MakeCommand(TEXT("add_blueprint_input_action_node"), TEXT("blueprint_node"), TEXT("Add an input action event node.")));
+    Commands.Add(MakeCommand(TEXT("add_blueprint_function_node"), TEXT("blueprint_node"), TEXT("Add a Blueprint function call node.")));
+    Commands.Add(MakeCommand(TEXT("add_blueprint_variable"), TEXT("blueprint_node"), TEXT("Add a Blueprint member variable.")));
+    Commands.Add(MakeCommand(TEXT("remove_blueprint_component_and_linked_nodes"), TEXT("blueprint_node"), TEXT("Remove a component template and directly linked generated nodes.")));
+    Commands.Add(MakeCommand(TEXT("remove_blueprint_actor_overlap_nodes"), TEXT("blueprint_node"), TEXT("Remove legacy actor overlap door chains.")));
+
+    Commands.Add(MakeCommand(TEXT("create_input_mapping"), TEXT("project"), TEXT("Create an input mapping.")));
+
+    Commands.Add(MakeCommand(TEXT("create_umg_widget_blueprint"), TEXT("umg"), TEXT("Create a Widget Blueprint.")));
+    Commands.Add(MakeCommand(TEXT("add_text_block_to_widget"), TEXT("umg"), TEXT("Add a TextBlock widget.")));
+    Commands.Add(MakeCommand(TEXT("add_button_to_widget"), TEXT("umg"), TEXT("Add a Button widget.")));
+    Commands.Add(MakeCommand(TEXT("bind_widget_event"), TEXT("umg"), TEXT("Bind a widget event.")));
+    Commands.Add(MakeCommand(TEXT("set_text_block_binding"), TEXT("umg"), TEXT("Bind a TextBlock property.")));
+    Commands.Add(MakeCommand(TEXT("add_widget_to_viewport"), TEXT("umg"), TEXT("Add a widget instance to the viewport.")));
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetArrayField(TEXT("commands"), Commands);
+    ResultObj->SetNumberField(TEXT("command_count"), Commands.Num());
+    ResultObj->SetStringField(TEXT("note"), TEXT("This catalog is returned by the Unreal plugin itself, so it survives lost chat context."));
+    return ResultObj;
+}
+
 // Initialize subsystem
 void UUnrealMCPBridge::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -222,6 +295,10 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
             {
                 ResultJson = MakeShareable(new FJsonObject);
                 ResultJson->SetStringField(TEXT("message"), TEXT("pong"));
+            }
+            else if (CommandType == TEXT("list_mcp_commands"))
+            {
+                ResultJson = GetCommandCatalog();
             }
             // Editor Commands (including actor manipulation)
             else if (CommandType == TEXT("get_actors_in_level") || 

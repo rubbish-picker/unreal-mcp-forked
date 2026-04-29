@@ -13,6 +13,30 @@ logger = logging.getLogger("UnrealMCP")
 
 def register_editor_tools(mcp: FastMCP):
     """Register editor tools with the MCP server."""
+
+    @mcp.tool()
+    def list_unreal_mcp_commands(ctx: Context) -> Dict[str, Any]:
+        """
+        List commands supported by the Unreal-side MCP bridge.
+
+        Use this as the first recovery step when chat context is lost or when the
+        Python MCP tool list may be stale after plugin changes.
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("list_mcp_commands", {})
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error listing Unreal MCP commands: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
     
     @mcp.tool()
     def get_actors_in_level(ctx: Context) -> List[Dict[str, Any]]:
