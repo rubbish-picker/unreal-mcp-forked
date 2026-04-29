@@ -5,6 +5,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "K2Node_Event.h"
+#include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
@@ -12,6 +13,7 @@
 #include "K2Node_Self.h"
 #include "EdGraphSchema_K2.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/LightComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -25,6 +27,7 @@
 #include "BlueprintActionDatabase.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Misc/PackageName.h"
 
 // JSON Utilities
 TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::CreateErrorResponse(const FString& Message)
@@ -145,6 +148,48 @@ FRotator FUnrealMCPCommonUtils::GetRotatorFromJson(const TSharedPtr<FJsonObject>
     return Result;
 }
 
+UClass* FUnrealMCPCommonUtils::FindClassByName(const FString& ClassName)
+{
+    if (ClassName.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    if (UClass* LoadedClass = LoadObject<UClass>(nullptr, *ClassName))
+    {
+        return LoadedClass;
+    }
+
+    FString ShortName = ClassName;
+    int32 SeparatorIndex = INDEX_NONE;
+    if (ShortName.FindLastChar(TEXT('.'), SeparatorIndex))
+    {
+        ShortName = ShortName.Mid(SeparatorIndex + 1);
+    }
+    if (ShortName.FindLastChar(TEXT('/'), SeparatorIndex))
+    {
+        ShortName = ShortName.Mid(SeparatorIndex + 1);
+    }
+
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* CandidateClass = *It;
+        if (!CandidateClass)
+        {
+            continue;
+        }
+
+        if (CandidateClass->GetName() == ClassName ||
+            CandidateClass->GetName() == ShortName ||
+            CandidateClass->GetPathName() == ClassName)
+        {
+            return CandidateClass;
+        }
+    }
+
+    return nullptr;
+}
+
 // Blueprint Utilities
 UBlueprint* FUnrealMCPCommonUtils::FindBlueprint(const FString& BlueprintName)
 {
@@ -153,8 +198,63 @@ UBlueprint* FUnrealMCPCommonUtils::FindBlueprint(const FString& BlueprintName)
 
 UBlueprint* FUnrealMCPCommonUtils::FindBlueprintByName(const FString& BlueprintName)
 {
-    FString AssetPath = TEXT("/Game/Blueprints/") + BlueprintName;
-    return LoadObject<UBlueprint>(nullptr, *AssetPath);
+    if (BlueprintName.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    // Allow callers to pass a full Unreal asset path directly.
+    if (BlueprintName.StartsWith(TEXT("/Game/")))
+    {
+        FString DirectObjectPath = BlueprintName;
+        if (!BlueprintName.Contains(TEXT(".")))
+        {
+            const FString AssetName = FPackageName::GetShortName(BlueprintName);
+            DirectObjectPath = FString::Printf(TEXT("%s.%s"), *BlueprintName, *AssetName);
+        }
+
+        return LoadObject<UBlueprint>(nullptr, *DirectObjectPath);
+    }
+
+    // Preserve the original fast path for the sample project's default folder.
+    const FString DefaultObjectPath = FString::Printf(TEXT("/Game/Blueprints/%s.%s"), *BlueprintName, *BlueprintName);
+    if (UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *DefaultObjectPath))
+    {
+        return Blueprint;
+    }
+
+    // Fall back to a project-wide asset registry lookup so blueprints can live anywhere under /Game.
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+    FARFilter Filter;
+    Filter.PackagePaths.Add(FName(TEXT("/Game")));
+    Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+    Filter.bRecursivePaths = true;
+    Filter.bRecursiveClasses = true;
+
+    TArray<FAssetData> BlueprintAssets;
+    AssetRegistry.GetAssets(Filter, BlueprintAssets);
+
+    for (const FAssetData& Asset : BlueprintAssets)
+    {
+        if (Asset.AssetName.ToString() == BlueprintName)
+        {
+            return Cast<UBlueprint>(Asset.GetAsset());
+        }
+    }
+
+    return nullptr;
+}
+
+bool FUnrealMCPCommonUtils::SaveBlueprintAsset(UBlueprint* Blueprint)
+{
+    if (!Blueprint)
+    {
+        return false;
+    }
+
+    return UEditorAssetLibrary::SaveLoadedAsset(Blueprint, false);
 }
 
 UEdGraph* FUnrealMCPCommonUtils::FindOrCreateEventGraph(UBlueprint* Blueprint)
@@ -192,6 +292,57 @@ UK2Node_Event* FUnrealMCPCommonUtils::CreateEventNode(UEdGraph* Graph, const FSt
     {
         return nullptr;
     }
+
+    FString ComponentName;
+    FString DelegateName;
+    if (EventName.Split(TEXT("."), &ComponentName, &DelegateName) && !ComponentName.IsEmpty() && !DelegateName.IsEmpty())
+    {
+        const FName ComponentPropertyName(*ComponentName);
+        const FName DelegatePropertyName(*DelegateName);
+
+        if (const UK2Node_ComponentBoundEvent* ExistingBoundEvent =
+            FKismetEditorUtilities::FindBoundEventForComponent(Blueprint, DelegatePropertyName, ComponentPropertyName))
+        {
+            UE_LOG(LogTemp, Display, TEXT("Using existing component-bound event node %s.%s (ID: %s)"),
+                *ComponentName, *DelegateName, *ExistingBoundEvent->NodeGuid.ToString());
+            return const_cast<UK2Node_ComponentBoundEvent*>(ExistingBoundEvent);
+        }
+
+        UClass* BlueprintClass = Blueprint->GeneratedClass;
+        FObjectProperty* ComponentProperty = BlueprintClass
+            ? FindFProperty<FObjectProperty>(BlueprintClass, ComponentPropertyName)
+            : nullptr;
+        if (!ComponentProperty)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to find component property '%s' on blueprint '%s'"),
+                *ComponentName, *Blueprint->GetName());
+            return nullptr;
+        }
+
+        UClass* ComponentClass = ComponentProperty->PropertyClass;
+        FMulticastDelegateProperty* DelegateProperty = ComponentClass
+            ? FindFProperty<FMulticastDelegateProperty>(ComponentClass, DelegatePropertyName)
+            : nullptr;
+        if (!DelegateProperty)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to find delegate '%s' on component class '%s'"),
+                *DelegateName, ComponentClass ? *ComponentClass->GetName() : TEXT("<null>"));
+            return nullptr;
+        }
+
+        UK2Node_ComponentBoundEvent* EventNode = NewObject<UK2Node_ComponentBoundEvent>(Graph);
+        EventNode->InitializeComponentBoundEventParams(ComponentProperty, DelegateProperty);
+        EventNode->NodePosX = Position.X;
+        EventNode->NodePosY = Position.Y;
+        Graph->AddNode(EventNode, true);
+        EventNode->CreateNewGuid();
+        EventNode->PostPlacedNewNode();
+        EventNode->AllocateDefaultPins();
+
+        UE_LOG(LogTemp, Display, TEXT("Created new component-bound event node %s.%s (ID: %s)"),
+            *ComponentName, *DelegateName, *EventNode->NodeGuid.ToString());
+        return EventNode;
+    }
     
     // Check for existing event node with this exact name
     for (UEdGraphNode* Node : Graph->Nodes)
@@ -219,6 +370,7 @@ UK2Node_Event* FUnrealMCPCommonUtils::CreateEventNode(UEdGraph* Graph, const FSt
         EventNode->NodePosX = Position.X;
         EventNode->NodePosY = Position.Y;
         Graph->AddNode(EventNode, true);
+        EventNode->CreateNewGuid();
         EventNode->PostPlacedNewNode();
         EventNode->AllocateDefaultPins();
         UE_LOG(LogTemp, Display, TEXT("Created new event node with name %s (ID: %s)"), 
@@ -552,6 +704,18 @@ bool FUnrealMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Pr
     {
         ((FStrProperty*)Property)->SetPropertyValue(PropertyAddr, Value->AsString());
         return true;
+    }
+    else if (Property->IsA<FNameProperty>())
+    {
+        FNameProperty* NameProperty = CastField<FNameProperty>(Property);
+        if (NameProperty && Value->Type == EJson::String)
+        {
+            NameProperty->SetPropertyValue(PropertyAddr, FName(*Value->AsString()));
+            return true;
+        }
+
+        OutErrorMessage = TEXT("Name property requires a string value");
+        return false;
     }
     else if (Property->IsA<FByteProperty>())
     {

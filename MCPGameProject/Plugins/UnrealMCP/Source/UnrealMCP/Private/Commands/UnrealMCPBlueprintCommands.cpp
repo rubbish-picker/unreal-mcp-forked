@@ -194,26 +194,26 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleAddComponentToBluepri
     UClass* ComponentClass = nullptr;
 
     // Try to find the class with exact name first
-    ComponentClass = FindObject<UClass>(ANY_PACKAGE, *ComponentType);
+    ComponentClass = FUnrealMCPCommonUtils::FindClassByName(ComponentType);
     
     // If not found, try with "Component" suffix
     if (!ComponentClass && !ComponentType.EndsWith(TEXT("Component")))
     {
         FString ComponentTypeWithSuffix = ComponentType + TEXT("Component");
-        ComponentClass = FindObject<UClass>(ANY_PACKAGE, *ComponentTypeWithSuffix);
+        ComponentClass = FUnrealMCPCommonUtils::FindClassByName(ComponentTypeWithSuffix);
     }
     
     // If still not found, try with "U" prefix
     if (!ComponentClass && !ComponentType.StartsWith(TEXT("U")))
     {
         FString ComponentTypeWithPrefix = TEXT("U") + ComponentType;
-        ComponentClass = FindObject<UClass>(ANY_PACKAGE, *ComponentTypeWithPrefix);
+        ComponentClass = FUnrealMCPCommonUtils::FindClassByName(ComponentTypeWithPrefix);
         
         // Try with both prefix and suffix
         if (!ComponentClass && !ComponentType.EndsWith(TEXT("Component")))
         {
             FString ComponentTypeWithBoth = TEXT("U") + ComponentType + TEXT("Component");
-            ComponentClass = FindObject<UClass>(ANY_PACKAGE, *ComponentTypeWithBoth);
+            ComponentClass = FUnrealMCPCommonUtils::FindClassByName(ComponentTypeWithBoth);
         }
     }
     
@@ -502,6 +502,113 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetComponentProperty(
                 UE_LOG(LogTemp, Error, TEXT("SetComponentProperty - Failed to set SpringArm property %s"), *PropertyName);
                 return FUnrealMCPCommonUtils::CreateErrorResponse(
                     FString::Printf(TEXT("Failed to set SpringArm property %s"), *PropertyName));
+            }
+        }
+    }
+
+    // Special handling for collision-oriented component APIs that are not exposed as plain properties.
+    if (Params->HasField(TEXT("property_value")))
+    {
+        TSharedPtr<FJsonValue> JsonValue = Params->Values.FindRef(TEXT("property_value"));
+
+        if (UBoxComponent* BoxComponent = Cast<UBoxComponent>(ComponentTemplate))
+        {
+            if (PropertyName == TEXT("BoxExtent"))
+            {
+                FVector Extent(50.0f, 50.0f, 50.0f);
+                if (JsonValue->Type == EJson::Array)
+                {
+                    const TArray<TSharedPtr<FJsonValue>>& Arr = JsonValue->AsArray();
+                    if (Arr.Num() == 3)
+                    {
+                        Extent = FVector(Arr[0]->AsNumber(), Arr[1]->AsNumber(), Arr[2]->AsNumber());
+                    }
+                    else
+                    {
+                        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("BoxExtent requires 3 values"));
+                    }
+                }
+                else if (JsonValue->Type == EJson::Number)
+                {
+                    const float UniformExtent = JsonValue->AsNumber();
+                    Extent = FVector(UniformExtent, UniformExtent, UniformExtent);
+                }
+                else
+                {
+                    return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("BoxExtent requires a number or [x,y,z] array"));
+                }
+
+                BoxComponent->SetBoxExtent(Extent, true);
+                FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+                TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+                ResultObj->SetStringField(TEXT("component"), ComponentName);
+                ResultObj->SetStringField(TEXT("property"), PropertyName);
+                ResultObj->SetBoolField(TEXT("success"), true);
+                return ResultObj;
+            }
+        }
+
+        if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(ComponentTemplate))
+        {
+            if (PropertyName == TEXT("CollisionProfileName"))
+            {
+                if (JsonValue->Type != EJson::String)
+                {
+                    return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("CollisionProfileName requires a string value"));
+                }
+
+                PrimitiveComponent->SetCollisionProfileName(FName(*JsonValue->AsString()));
+                FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+                TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+                ResultObj->SetStringField(TEXT("component"), ComponentName);
+                ResultObj->SetStringField(TEXT("property"), PropertyName);
+                ResultObj->SetBoolField(TEXT("success"), true);
+                return ResultObj;
+            }
+
+            if (PropertyName == TEXT("CollisionEnabled"))
+            {
+                ECollisionEnabled::Type CollisionEnabled = ECollisionEnabled::QueryOnly;
+
+                if (JsonValue->Type == EJson::String)
+                {
+                    const FString Value = JsonValue->AsString();
+                    if (Value == TEXT("NoCollision"))
+                    {
+                        CollisionEnabled = ECollisionEnabled::NoCollision;
+                    }
+                    else if (Value == TEXT("PhysicsOnly"))
+                    {
+                        CollisionEnabled = ECollisionEnabled::PhysicsOnly;
+                    }
+                    else if (Value == TEXT("QueryAndPhysics"))
+                    {
+                        CollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+                    }
+                    else
+                    {
+                        CollisionEnabled = ECollisionEnabled::QueryOnly;
+                    }
+                }
+                else if (JsonValue->Type == EJson::Number)
+                {
+                    CollisionEnabled = static_cast<ECollisionEnabled::Type>(FMath::RoundToInt(JsonValue->AsNumber()));
+                }
+                else
+                {
+                    return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("CollisionEnabled requires a string or numeric enum value"));
+                }
+
+                PrimitiveComponent->SetCollisionEnabled(CollisionEnabled);
+                FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+                TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+                ResultObj->SetStringField(TEXT("component"), ComponentName);
+                ResultObj->SetStringField(TEXT("property"), PropertyName);
+                ResultObj->SetBoolField(TEXT("success"), true);
+                return ResultObj;
             }
         }
     }
@@ -841,8 +948,12 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCompileBlueprint(cons
         return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Compile the blueprint
+    // Compile and save the blueprint so edits persist after restarting the editor.
     FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    if (!FUnrealMCPCommonUtils::SaveBlueprintAsset(Blueprint))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to save blueprint: %s"), *BlueprintName));
+    }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("name"), BlueprintName);

@@ -40,6 +40,8 @@ public:
     static UBlueprint* FindBlueprint(const FString& BlueprintName);
     static UBlueprint* FindBlueprintByName(const FString& BlueprintName);
     static UEdGraph* FindOrCreateEventGraph(UBlueprint* Blueprint);
+    static UClass* FindClassByName(const FString& ClassName);
+    static bool SaveBlueprintAsset(UBlueprint* Blueprint);
     
     // Blueprint node utilities
     static UK2Node_Event* CreateEventNode(UEdGraph* Graph, const FString& EventName, const FVector2D& Position);

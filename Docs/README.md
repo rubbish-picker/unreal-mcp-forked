@@ -5,4 +5,5 @@ Welcome to the documentation for the Unreal Engine Model Context Protocol (MCP) 
 ## Contents
 
 - [Tools](Tools/README.md) - All the tools that are available.
+- [Blueprint Automation Lessons](blueprint-automation-lessons.md) - Practical checks and pitfalls from automating Blueprint edits through MCP.
 
