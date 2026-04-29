@@ -6,6 +6,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "K2Node_Event.h"
+#include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_InputAction.h"
@@ -16,6 +17,8 @@
 #include "Camera/CameraActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "EdGraphSchema_K2.h"
+#include "Engine/SCS_Node.h"
+#include "Engine/SimpleConstructionScript.h"
 
 // Declare the log category
 DEFINE_LOG_CATEGORY_STATIC(LogUnrealMCP, Log, All);
@@ -58,8 +61,527 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleCommand(const FSt
     {
         return HandleFindBlueprintNodes(Params);
     }
+    else if (CommandType == TEXT("inspect_blueprint_graph"))
+    {
+        return HandleInspectBlueprintGraph(Params);
+    }
+    else if (CommandType == TEXT("remove_blueprint_nodes"))
+    {
+        return HandleRemoveBlueprintNodes(Params);
+    }
+    else if (CommandType == TEXT("remove_blueprint_component_and_linked_nodes"))
+    {
+        return HandleRemoveBlueprintComponentAndLinkedNodes(Params);
+    }
+    else if (CommandType == TEXT("remove_blueprint_actor_overlap_nodes"))
+    {
+        return HandleRemoveBlueprintActorOverlapNodes(Params);
+    }
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown blueprint node command: %s"), *CommandType));
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleInspectBlueprintGraph(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString GraphName;
+    Params->TryGetStringField(TEXT("graph_name"), GraphName);
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    TArray<UEdGraph*> Graphs;
+    Graphs.Append(Blueprint->UbergraphPages);
+    Graphs.Append(Blueprint->FunctionGraphs);
+    Graphs.Append(Blueprint->MacroGraphs);
+    Graphs.Append(Blueprint->DelegateSignatureGraphs);
+
+    TArray<TSharedPtr<FJsonValue>> GraphArray;
+    for (UEdGraph* Graph : Graphs)
+    {
+        if (!Graph)
+        {
+            continue;
+        }
+
+        if (!GraphName.IsEmpty() && Graph->GetName() != GraphName)
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> GraphObj = MakeShared<FJsonObject>();
+        GraphObj->SetStringField(TEXT("name"), Graph->GetName());
+        GraphObj->SetStringField(TEXT("class"), Graph->GetClass()->GetName());
+
+        TArray<TSharedPtr<FJsonValue>> NodeArray;
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (!Node)
+            {
+                continue;
+            }
+
+            TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
+            NodeObj->SetStringField(TEXT("id"), Node->NodeGuid.ToString());
+            NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+            NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+            NodeObj->SetNumberField(TEXT("x"), Node->NodePosX);
+            NodeObj->SetNumberField(TEXT("y"), Node->NodePosY);
+
+            if (UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node))
+            {
+                NodeObj->SetStringField(TEXT("event_name"), EventNode->EventReference.GetMemberName().ToString());
+            }
+            if (UK2Node_ComponentBoundEvent* ComponentEventNode = Cast<UK2Node_ComponentBoundEvent>(Node))
+            {
+                NodeObj->SetStringField(TEXT("component_name"), ComponentEventNode->ComponentPropertyName.ToString());
+            }
+            if (UK2Node_CallFunction* FunctionNode = Cast<UK2Node_CallFunction>(Node))
+            {
+                NodeObj->SetStringField(TEXT("function_name"), FunctionNode->GetFunctionName().ToString());
+            }
+            if (UK2Node_VariableGet* VariableGetNode = Cast<UK2Node_VariableGet>(Node))
+            {
+                NodeObj->SetStringField(TEXT("variable_name"), VariableGetNode->VariableReference.GetMemberName().ToString());
+            }
+
+            TArray<TSharedPtr<FJsonValue>> PinArray;
+            for (UEdGraphPin* Pin : Node->Pins)
+            {
+                if (!Pin)
+                {
+                    continue;
+                }
+
+                TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+                PinObj->SetStringField(TEXT("id"), Pin->PinId.ToString());
+                PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+                PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+                PinObj->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
+                PinObj->SetStringField(TEXT("subcategory"), Pin->PinType.PinSubCategory.ToString());
+                PinObj->SetStringField(TEXT("default_value"), Pin->DefaultValue);
+
+                TArray<TSharedPtr<FJsonValue>> LinkArray;
+                for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                {
+                    UEdGraphNode* LinkedNode = LinkedPin ? LinkedPin->GetOwningNode() : nullptr;
+                    if (!LinkedPin || !LinkedNode)
+                    {
+                        continue;
+                    }
+
+                    TSharedPtr<FJsonObject> LinkObj = MakeShared<FJsonObject>();
+                    LinkObj->SetStringField(TEXT("node_id"), LinkedNode->NodeGuid.ToString());
+                    LinkObj->SetStringField(TEXT("pin_id"), LinkedPin->PinId.ToString());
+                    LinkObj->SetStringField(TEXT("pin_name"), LinkedPin->PinName.ToString());
+                    LinkArray.Add(MakeShared<FJsonValueObject>(LinkObj));
+                }
+                PinObj->SetArrayField(TEXT("links"), LinkArray);
+                PinArray.Add(MakeShared<FJsonValueObject>(PinObj));
+            }
+            NodeObj->SetArrayField(TEXT("pins"), PinArray);
+            NodeArray.Add(MakeShared<FJsonValueObject>(NodeObj));
+        }
+
+        GraphObj->SetArrayField(TEXT("nodes"), NodeArray);
+        GraphObj->SetNumberField(TEXT("node_count"), NodeArray.Num());
+        GraphArray.Add(MakeShared<FJsonValueObject>(GraphObj));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    ResultObj->SetArrayField(TEXT("graphs"), GraphArray);
+    ResultObj->SetNumberField(TEXT("graph_count"), GraphArray.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleRemoveBlueprintNodes(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>* NodeIdValues = nullptr;
+    if (!Params->TryGetArrayField(TEXT("node_ids"), NodeIdValues) || !NodeIdValues)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'node_ids' array parameter"));
+    }
+
+    bool bCompile = true;
+    Params->TryGetBoolField(TEXT("compile"), bCompile);
+
+    bool bSave = true;
+    Params->TryGetBoolField(TEXT("save"), bSave);
+
+    bool bDryRun = false;
+    Params->TryGetBoolField(TEXT("dry_run"), bDryRun);
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    TSet<FString> RequestedNodeIds;
+    for (const TSharedPtr<FJsonValue>& NodeIdValue : *NodeIdValues)
+    {
+        if (NodeIdValue.IsValid())
+        {
+            FString NodeId = NodeIdValue->AsString();
+            if (!NodeId.IsEmpty())
+            {
+                RequestedNodeIds.Add(NodeId);
+            }
+        }
+    }
+
+    TArray<UEdGraph*> Graphs;
+    Graphs.Append(Blueprint->UbergraphPages);
+    Graphs.Append(Blueprint->FunctionGraphs);
+    Graphs.Append(Blueprint->MacroGraphs);
+    Graphs.Append(Blueprint->DelegateSignatureGraphs);
+
+    TArray<UEdGraphNode*> NodesToRemove;
+    TArray<TSharedPtr<FJsonValue>> RemovedNodeArray;
+    for (UEdGraph* Graph : Graphs)
+    {
+        if (!Graph)
+        {
+            continue;
+        }
+
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (!Node || !RequestedNodeIds.Contains(Node->NodeGuid.ToString()))
+            {
+                continue;
+            }
+
+            NodesToRemove.Add(Node);
+
+            TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
+            NodeObj->SetStringField(TEXT("id"), Node->NodeGuid.ToString());
+            NodeObj->SetStringField(TEXT("graph"), Graph->GetName());
+            NodeObj->SetStringField(TEXT("class"), Node->GetClass()->GetName());
+            NodeObj->SetStringField(TEXT("title"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+            RemovedNodeArray.Add(MakeShared<FJsonValueObject>(NodeObj));
+        }
+    }
+
+    TSet<FString> FoundNodeIds;
+    for (UEdGraphNode* Node : NodesToRemove)
+    {
+        if (Node)
+        {
+            FoundNodeIds.Add(Node->NodeGuid.ToString());
+        }
+    }
+
+    TArray<TSharedPtr<FJsonValue>> NotFoundArray;
+    for (const FString& RequestedNodeId : RequestedNodeIds)
+    {
+        if (!FoundNodeIds.Contains(RequestedNodeId))
+        {
+            NotFoundArray.Add(MakeShared<FJsonValueString>(RequestedNodeId));
+        }
+    }
+
+    if (!bDryRun)
+    {
+        for (UEdGraphNode* Node : NodesToRemove)
+        {
+            if (Node)
+            {
+                FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+            }
+        }
+
+        if (NodesToRemove.Num() > 0)
+        {
+            FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+            if (bCompile)
+            {
+                FKismetEditorUtilities::CompileBlueprint(Blueprint);
+            }
+            if (bSave)
+            {
+                FUnrealMCPCommonUtils::SaveBlueprintAsset(Blueprint);
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    ResultObj->SetBoolField(TEXT("dry_run"), bDryRun);
+    ResultObj->SetNumberField(TEXT("removed_count"), NodesToRemove.Num());
+    ResultObj->SetArrayField(TEXT("removed_nodes"), RemovedNodeArray);
+    ResultObj->SetArrayField(TEXT("not_found_node_ids"), NotFoundArray);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleRemoveBlueprintActorOverlapNodes(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString BeginEventName = TEXT("ReceiveActorBeginOverlap");
+    Params->TryGetStringField(TEXT("begin_event_name"), BeginEventName);
+
+    FString EndEventName = TEXT("ReceiveActorEndOverlap");
+    Params->TryGetStringField(TEXT("end_event_name"), EndEventName);
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    UEdGraph* EventGraph = FUnrealMCPCommonUtils::FindOrCreateEventGraph(Blueprint);
+    if (!EventGraph)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get event graph"));
+    }
+
+    TSet<UEdGraphNode*> NodesToRemove;
+    TArray<TSharedPtr<FJsonValue>> RemovedNodeIds;
+    int32 RemovedBeginEvents = 0;
+    int32 RemovedEndEvents = 0;
+    int32 RemovedOpenDoorCalls = 0;
+    int32 RemovedCloseDoorCalls = 0;
+
+    auto AddNodeToRemove = [&NodesToRemove, &RemovedNodeIds](UEdGraphNode* Node)
+    {
+        if (Node && !NodesToRemove.Contains(Node))
+        {
+            NodesToRemove.Add(Node);
+            RemovedNodeIds.Add(MakeShared<FJsonValueString>(Node->NodeGuid.ToString()));
+        }
+    };
+
+    auto AddDirectLinkedCall = [&AddNodeToRemove, &RemovedOpenDoorCalls, &RemovedCloseDoorCalls](UEdGraphNode* SourceNode, const FName ExpectedFunctionName)
+    {
+        if (!SourceNode)
+        {
+            return;
+        }
+
+        for (UEdGraphPin* Pin : SourceNode->Pins)
+        {
+            if (!Pin || Pin->Direction != EGPD_Output || Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+            {
+                continue;
+            }
+
+            for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+            {
+                UEdGraphNode* LinkedNode = LinkedPin ? LinkedPin->GetOwningNode() : nullptr;
+                UK2Node_CallFunction* LinkedFunction = Cast<UK2Node_CallFunction>(LinkedNode);
+                if (LinkedFunction && LinkedFunction->GetFunctionName() == ExpectedFunctionName)
+                {
+                    AddNodeToRemove(LinkedNode);
+                    if (ExpectedFunctionName == FName(TEXT("OpenDoor")))
+                    {
+                        ++RemovedOpenDoorCalls;
+                    }
+                    else if (ExpectedFunctionName == FName(TEXT("CloseDoor")))
+                    {
+                        ++RemovedCloseDoorCalls;
+                    }
+                }
+            }
+        }
+    };
+
+    for (UEdGraphNode* Node : EventGraph->Nodes)
+    {
+        UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node);
+        if (!EventNode)
+        {
+            continue;
+        }
+
+        const FName EventName = EventNode->EventReference.GetMemberName();
+        if (EventName == FName(*BeginEventName))
+        {
+            AddNodeToRemove(Node);
+            ++RemovedBeginEvents;
+            AddDirectLinkedCall(Node, FName(TEXT("OpenDoor")));
+        }
+        else if (EventName == FName(*EndEventName))
+        {
+            AddNodeToRemove(Node);
+            ++RemovedEndEvents;
+            AddDirectLinkedCall(Node, FName(TEXT("CloseDoor")));
+        }
+    }
+
+    const int32 RemovedGraphNodes = NodesToRemove.Num();
+    for (UEdGraphNode* Node : NodesToRemove)
+    {
+        if (Node)
+        {
+            FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+        }
+    }
+
+    if (RemovedGraphNodes > 0)
+    {
+        FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+        FKismetEditorUtilities::CompileBlueprint(Blueprint);
+        FUnrealMCPCommonUtils::SaveBlueprintAsset(Blueprint);
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    ResultObj->SetNumberField(TEXT("removed_begin_events"), RemovedBeginEvents);
+    ResultObj->SetNumberField(TEXT("removed_end_events"), RemovedEndEvents);
+    ResultObj->SetNumberField(TEXT("removed_open_door_calls"), RemovedOpenDoorCalls);
+    ResultObj->SetNumberField(TEXT("removed_close_door_calls"), RemovedCloseDoorCalls);
+    ResultObj->SetNumberField(TEXT("removed_graph_nodes"), RemovedGraphNodes);
+    ResultObj->SetArrayField(TEXT("removed_node_ids"), RemovedNodeIds);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleRemoveBlueprintComponentAndLinkedNodes(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString ComponentName;
+    if (!Params->TryGetStringField(TEXT("component_name"), ComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'component_name' parameter"));
+    }
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    int32 RemovedComponents = 0;
+    if (Blueprint->SimpleConstructionScript)
+    {
+        TArray<USCS_Node*> Nodes = Blueprint->SimpleConstructionScript->GetAllNodes();
+        for (USCS_Node* SCSNode : Nodes)
+        {
+            if (SCSNode && SCSNode->GetVariableName() == FName(*ComponentName))
+            {
+                Blueprint->SimpleConstructionScript->RemoveNode(SCSNode);
+                ++RemovedComponents;
+            }
+        }
+    }
+
+    UEdGraph* EventGraph = FUnrealMCPCommonUtils::FindOrCreateEventGraph(Blueprint);
+    if (!EventGraph)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get event graph"));
+    }
+
+    TSet<UEdGraphNode*> NodesToRemove;
+    for (UEdGraphNode* Node : EventGraph->Nodes)
+    {
+        if (UK2Node_ComponentBoundEvent* BoundEvent = Cast<UK2Node_ComponentBoundEvent>(Node))
+        {
+            if (BoundEvent->ComponentPropertyName == FName(*ComponentName))
+            {
+                NodesToRemove.Add(Node);
+            }
+        }
+        else if (UK2Node_CallFunction* FunctionNode = Cast<UK2Node_CallFunction>(Node))
+        {
+            if (FunctionNode->GetFunctionName() == FName(TEXT("PrintString")))
+            {
+                if (UEdGraphPin* StringPin = FunctionNode->FindPin(TEXT("InString")))
+                {
+                    if (StringPin->DefaultValue.Contains(TEXT("Door BeginOverlap")) ||
+                        StringPin->DefaultValue.Contains(TEXT("Door EndOverlap")))
+                    {
+                        NodesToRemove.Add(Node);
+                    }
+                }
+            }
+        }
+    }
+
+    bool bAddedNode = true;
+    while (bAddedNode)
+    {
+        bAddedNode = false;
+        TArray<UEdGraphNode*> CurrentNodes = NodesToRemove.Array();
+        for (UEdGraphNode* Node : CurrentNodes)
+        {
+            if (!Node)
+            {
+                continue;
+            }
+
+            for (UEdGraphPin* Pin : Node->Pins)
+            {
+                if (!Pin || Pin->Direction != EGPD_Output || Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+                {
+                    continue;
+                }
+
+                for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+                {
+                    UEdGraphNode* LinkedNode = LinkedPin ? LinkedPin->GetOwningNode() : nullptr;
+                    UK2Node_CallFunction* LinkedFunction = Cast<UK2Node_CallFunction>(LinkedNode);
+                    if (!LinkedFunction)
+                    {
+                        continue;
+                    }
+
+                    const FName FunctionName = LinkedFunction->GetFunctionName();
+                    if ((FunctionName == FName(TEXT("PrintString")) ||
+                         FunctionName == FName(TEXT("OpenDoor")) ||
+                         FunctionName == FName(TEXT("CloseDoor"))) &&
+                        !NodesToRemove.Contains(LinkedNode))
+                    {
+                        NodesToRemove.Add(LinkedNode);
+                        bAddedNode = true;
+                    }
+                }
+            }
+        }
+    }
+
+    const int32 RemovedGraphNodes = NodesToRemove.Num();
+    for (UEdGraphNode* Node : NodesToRemove)
+    {
+        if (Node)
+        {
+            FBlueprintEditorUtils::RemoveNode(Blueprint, Node, true);
+        }
+    }
+
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    FUnrealMCPCommonUtils::SaveBlueprintAsset(Blueprint);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    ResultObj->SetStringField(TEXT("component_name"), ComponentName);
+    ResultObj->SetNumberField(TEXT("removed_components"), RemovedComponents);
+    ResultObj->SetNumberField(TEXT("removed_graph_nodes"), RemovedGraphNodes);
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPBlueprintNodeCommands::HandleConnectBlueprintNodes(const TSharedPtr<FJsonObject>& Params)

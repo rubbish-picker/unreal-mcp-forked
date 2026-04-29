@@ -10,6 +10,9 @@
 #include "GameFramework/Actor.h"
 #include "Engine/Selection.h"
 #include "Kismet/GameplayStatics.h"
+#include "FileHelpers.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/PointLight.h"
@@ -20,6 +23,10 @@
 #include "Subsystems/EditorActorSubsystem.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "Engine/SCS_Node.h"
+#include "Components/PrimitiveComponent.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -60,6 +67,22 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     {
         return HandleSetActorProperty(Params);
     }
+    else if (CommandType == TEXT("inspect_object_properties"))
+    {
+        return HandleInspectObjectProperties(Params);
+    }
+    else if (CommandType == TEXT("inspect_selected_objects"))
+    {
+        return HandleInspectSelectedObjects(Params);
+    }
+    else if (CommandType == TEXT("inspect_component_collision"))
+    {
+        return HandleInspectComponentCollision(Params);
+    }
+    else if (CommandType == TEXT("find_asset_references"))
+    {
+        return HandleFindAssetReferences(Params);
+    }
     // Blueprint actor spawning
     else if (CommandType == TEXT("spawn_blueprint_actor"))
     {
@@ -73,6 +96,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("take_screenshot"))
     {
         return HandleTakeScreenshot(Params);
+    }
+    else if (CommandType == TEXT("open_level"))
+    {
+        return HandleOpenLevel(Params);
+    }
+    else if (CommandType == TEXT("save_current_level"))
+    {
+        return HandleSaveCurrentLevel(Params);
     }
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown editor command: %s"), *CommandType));
@@ -396,6 +427,238 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorProperty(const T
     }
 }
 
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleInspectObjectProperties(const TSharedPtr<FJsonObject>& Params)
+{
+    int32 MaxProperties = 200;
+    Params->TryGetNumberField(TEXT("max_properties"), MaxProperties);
+
+    UObject* TargetObject = nullptr;
+
+    FString ObjectPath;
+    if (Params->TryGetStringField(TEXT("object_path"), ObjectPath) && !ObjectPath.IsEmpty())
+    {
+        TargetObject = LoadObject<UObject>(nullptr, *ObjectPath);
+        if (!TargetObject)
+        {
+            TargetObject = FindObject<UObject>(nullptr, *ObjectPath);
+        }
+    }
+
+    FString ActorName;
+    if (!TargetObject && Params->TryGetStringField(TEXT("actor_name"), ActorName))
+    {
+        TArray<AActor*> AllActors;
+        UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
+        for (AActor* Actor : AllActors)
+        {
+            if (Actor && Actor->GetName() == ActorName)
+            {
+                FString ComponentName;
+                if (Params->TryGetStringField(TEXT("component_name"), ComponentName) && !ComponentName.IsEmpty())
+                {
+                    TArray<UActorComponent*> Components;
+                    Actor->GetComponents(Components);
+                    for (UActorComponent* Component : Components)
+                    {
+                        if (Component && Component->GetName() == ComponentName)
+                        {
+                            TargetObject = Component;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    TargetObject = Actor;
+                }
+                break;
+            }
+        }
+    }
+
+    FString BlueprintName;
+    if (!TargetObject && Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+        if (!Blueprint)
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+        }
+
+        FString ComponentName;
+        if (Params->TryGetStringField(TEXT("component_name"), ComponentName) && !ComponentName.IsEmpty())
+        {
+            if (Blueprint->SimpleConstructionScript)
+            {
+                for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+                {
+                    if (Node && Node->GetVariableName() == FName(*ComponentName))
+                    {
+                        TargetObject = Node->ComponentTemplate;
+                        break;
+                    }
+                }
+            }
+        }
+        else
+        {
+            TargetObject = Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetDefaultObject() : Blueprint;
+        }
+    }
+
+    if (!TargetObject)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Target object not found. Provide object_path, actor_name, or blueprint_name."));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = FUnrealMCPCommonUtils::ObjectToJsonObject(TargetObject, true, MaxProperties);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleInspectSelectedObjects(const TSharedPtr<FJsonObject>& Params)
+{
+    int32 MaxProperties = 100;
+    Params->TryGetNumberField(TEXT("max_properties"), MaxProperties);
+
+    TArray<TSharedPtr<FJsonValue>> SelectedArray;
+
+    if (GEditor)
+    {
+        USelection* SelectedActors = GEditor->GetSelectedActors();
+        if (SelectedActors)
+        {
+            for (FSelectionIterator It(*SelectedActors); It; ++It)
+            {
+                if (UObject* SelectedObject = *It)
+                {
+                    SelectedArray.Add(MakeShared<FJsonValueObject>(FUnrealMCPCommonUtils::ObjectToJsonObject(SelectedObject, true, MaxProperties)));
+                }
+            }
+        }
+
+        USelection* SelectedObjects = GEditor->GetSelectedObjects();
+        if (SelectedObjects)
+        {
+            for (FSelectionIterator It(*SelectedObjects); It; ++It)
+            {
+                if (UObject* SelectedObject = *It)
+                {
+                    SelectedArray.Add(MakeShared<FJsonValueObject>(FUnrealMCPCommonUtils::ObjectToJsonObject(SelectedObject, true, MaxProperties)));
+                }
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetArrayField(TEXT("selected_objects"), SelectedArray);
+    ResultObj->SetNumberField(TEXT("count"), SelectedArray.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleInspectComponentCollision(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorName;
+    if (!Params->TryGetStringField(TEXT("actor_name"), ActorName))
+    {
+        Params->TryGetStringField(TEXT("name"), ActorName);
+    }
+
+    if (ActorName.IsEmpty())
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'actor_name' parameter"));
+    }
+
+    FString ComponentName;
+    Params->TryGetStringField(TEXT("component_name"), ComponentName);
+
+    AActor* TargetActor = nullptr;
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && Actor->GetName() == ActorName)
+        {
+            TargetActor = Actor;
+            break;
+        }
+    }
+
+    if (!TargetActor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> ComponentArray;
+    TArray<UActorComponent*> Components;
+    TargetActor->GetComponents(Components);
+    for (UActorComponent* Component : Components)
+    {
+        UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component);
+        if (!PrimitiveComponent)
+        {
+            continue;
+        }
+        if (!ComponentName.IsEmpty() && PrimitiveComponent->GetName() != ComponentName)
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> ComponentObj = FUnrealMCPCommonUtils::ObjectToJsonObject(PrimitiveComponent, false);
+        ComponentObj->SetObjectField(TEXT("collision"), FUnrealMCPCommonUtils::PrimitiveCollisionToJsonObject(PrimitiveComponent));
+        ComponentArray.Add(MakeShared<FJsonValueObject>(ComponentObj));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("actor_name"), ActorName);
+    ResultObj->SetArrayField(TEXT("components"), ComponentArray);
+    ResultObj->SetNumberField(TEXT("count"), ComponentArray.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFindAssetReferences(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    FString PackageName = AssetPath;
+    if (AssetPath.Contains(TEXT(".")))
+    {
+        PackageName = FPackageName::ObjectPathToPackageName(AssetPath);
+    }
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+    TArray<FName> Referencers;
+    TArray<FName> Dependencies;
+    AssetRegistry.GetReferencers(FName(*PackageName), Referencers);
+    AssetRegistry.GetDependencies(FName(*PackageName), Dependencies);
+
+    TArray<TSharedPtr<FJsonValue>> ReferencerArray;
+    for (const FName& Referencer : Referencers)
+    {
+        ReferencerArray.Add(MakeShared<FJsonValueString>(Referencer.ToString()));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> DependencyArray;
+    for (const FName& Dependency : Dependencies)
+    {
+        DependencyArray.Add(MakeShared<FJsonValueString>(Dependency.ToString()));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetStringField(TEXT("package_name"), PackageName);
+    ResultObj->SetArrayField(TEXT("referencers"), ReferencerArray);
+    ResultObj->SetArrayField(TEXT("dependencies"), DependencyArray);
+    ResultObj->SetNumberField(TEXT("referencer_count"), ReferencerArray.Num());
+    ResultObj->SetNumberField(TEXT("dependency_count"), DependencyArray.Num());
+    return ResultObj;
+}
+
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnBlueprintActor(const TSharedPtr<FJsonObject>& Params)
 {
     // Get required parameters
@@ -598,3 +861,81 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleTakeScreenshot(const TSh
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to take screenshot"));
 } 
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    FString LevelName;
+    if (!Params->TryGetStringField(TEXT("level_name"), LevelName) &&
+        !Params->TryGetStringField(TEXT("level_path"), LevelName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'level_name' parameter"));
+    }
+
+    if (LevelName.IsEmpty())
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("'level_name' cannot be empty"));
+    }
+
+    FString Filename = LevelName;
+    if (LevelName.StartsWith(TEXT("/Game/")))
+    {
+        Filename = FPackageName::LongPackageNameToFilename(LevelName, FPackageName::GetMapPackageExtension());
+    }
+    else if (!FPaths::FileExists(Filename))
+    {
+        FString PackageName = LevelName;
+        if (!PackageName.StartsWith(TEXT("/")))
+        {
+            PackageName = FString::Printf(TEXT("/Game/%s"), *LevelName);
+        }
+        Filename = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetMapPackageExtension());
+    }
+
+    if (!FPaths::FileExists(Filename))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Level file not found: %s"), *Filename));
+    }
+
+    const bool bLoadAsTemplate = false;
+    const bool bShowProgress = false;
+    const bool bOpened = FEditorFileUtils::LoadMap(Filename, bLoadAsTemplate, bShowProgress);
+    if (!bOpened)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to open level: %s"), *LevelName));
+    }
+
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("level_name"), LevelName);
+    ResultObj->SetStringField(TEXT("filename"), Filename);
+    if (World)
+    {
+        ResultObj->SetStringField(TEXT("current_world"), World->GetName());
+    }
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSaveCurrentLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!World || !World->PersistentLevel)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get current editor level"));
+    }
+
+    const bool bSaved = FEditorFileUtils::SaveLevel(World->PersistentLevel);
+    if (!bSaved)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to save level: %s"), *World->GetName()));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("world"), World->GetName());
+    if (UPackage* Package = World->GetOutermost())
+    {
+        ResultObj->SetStringField(TEXT("package"), Package->GetName());
+    }
+    ResultObj->SetBoolField(TEXT("saved"), true);
+    return ResultObj;
+}

@@ -8,6 +8,29 @@ Blueprint tools allow you to create and manipulate Blueprint assets in Unreal En
 
 ## Blueprint Tools
 
+### inspect_blueprint_components
+
+Inspect a Blueprint's component tree, component template properties, and primitive collision settings.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+- `max_properties` (integer, optional) - Maximum number of template properties per component
+
+### inspect_blueprint_defaults
+
+Inspect a Blueprint class default object's Details-style properties.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+- `max_properties` (integer, optional) - Maximum number of CDO properties to return
+
+### inspect_blueprint_timelines
+
+Inspect Timeline templates inside a Blueprint, including length, playback flags, tracks, curves, and keyframes.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+
 ### create_blueprint
 
 Create a new Blueprint class.

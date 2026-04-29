@@ -417,4 +417,74 @@ def register_blueprint_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
     
+    @mcp.tool()
+    def inspect_blueprint_components(
+        ctx: Context,
+        blueprint_name: str,
+        max_properties: int = 100
+    ) -> Dict[str, Any]:
+        """Inspect a Blueprint's component tree, component defaults, and collision settings."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("inspect_blueprint_components", {
+                "blueprint_name": blueprint_name,
+                "max_properties": max_properties
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting blueprint components: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_blueprint_defaults(
+        ctx: Context,
+        blueprint_name: str,
+        max_properties: int = 200
+    ) -> Dict[str, Any]:
+        """Inspect a Blueprint class default object's Details-style properties."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("inspect_blueprint_defaults", {
+                "blueprint_name": blueprint_name,
+                "max_properties": max_properties
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting blueprint defaults: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_blueprint_timelines(ctx: Context, blueprint_name: str) -> Dict[str, Any]:
+        """Inspect Timeline templates, tracks, curves, and keyframes in a Blueprint."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("inspect_blueprint_timelines", {
+                "blueprint_name": blueprint_name
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting blueprint timelines: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
     logger.info("Blueprint tools registered successfully") 

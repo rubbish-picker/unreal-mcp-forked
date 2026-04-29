@@ -8,6 +8,25 @@ Node tools allow you to manipulate Blueprint graph nodes and connections program
 
 ## Node Tools
 
+### inspect_blueprint_graph
+
+Inspect Blueprint graph structure, including graphs, nodes, pins, and links.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+- `graph_name` (string, optional) - Graph name filter, for example `EventGraph`
+
+### remove_blueprint_nodes
+
+Remove Blueprint graph nodes by GUID.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+- `node_ids` (array) - Node GUIDs to remove
+- `compile` (boolean, optional) - Compile after removal
+- `save` (boolean, optional) - Save after removal
+- `dry_run` (boolean, optional) - Preview removal without changing the asset
+
 ### add_blueprint_event_node
 
 Add an event node to a Blueprint's event graph.

@@ -426,5 +426,86 @@ def register_blueprint_node_tools(mcp: FastMCP):
             error_msg = f"Error finding nodes: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_blueprint_graph(
+        ctx: Context,
+        blueprint_name: str,
+        graph_name: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Inspect Blueprint graph structure, including nodes, pins, and links.
+
+        Args:
+            blueprint_name: Name or path of the target Blueprint
+            graph_name: Optional graph name filter, such as EventGraph
+
+        Returns:
+            Response containing graph, node, pin, and link data
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name,
+                "graph_name": graph_name
+            }
+            response = unreal.send_command("inspect_blueprint_graph", params)
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting blueprint graph: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def remove_blueprint_nodes(
+        ctx: Context,
+        blueprint_name: str,
+        node_ids: List[str],
+        compile: bool = True,
+        save: bool = True,
+        dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Remove Blueprint graph nodes by GUID.
+
+        Args:
+            blueprint_name: Name or path of the target Blueprint
+            node_ids: Node GUIDs to remove
+            compile: Compile the Blueprint after removal
+            save: Save the Blueprint asset after removal
+            dry_run: Preview what would be removed without changing the asset
+
+        Returns:
+            Response containing removed node details and any missing GUIDs
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "blueprint_name": blueprint_name,
+                "node_ids": node_ids,
+                "compile": compile,
+                "save": save,
+                "dry_run": dry_run
+            }
+            response = unreal.send_command("remove_blueprint_nodes", params)
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error removing blueprint nodes: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
     
     logger.info("Blueprint node tools registered successfully")

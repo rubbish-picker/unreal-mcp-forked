@@ -16,6 +16,8 @@ class UK2Node_VariableSet;
 class UK2Node_InputAction;
 class UK2Node_Self;
 class UFunction;
+class UObject;
+class UPrimitiveComponent;
 
 /**
  * Common utilities for UnrealMCP commands
@@ -35,6 +37,9 @@ public:
     // Actor utilities
     static TSharedPtr<FJsonValue> ActorToJson(AActor* Actor);
     static TSharedPtr<FJsonObject> ActorToJsonObject(AActor* Actor, bool bDetailed = false);
+    static TSharedPtr<FJsonObject> ObjectToJsonObject(UObject* Object, bool bIncludeProperties = false, int32 MaxProperties = 200);
+    static TSharedPtr<FJsonObject> ObjectPropertiesToJsonObject(UObject* Object, int32 MaxProperties = 200);
+    static TSharedPtr<FJsonObject> PrimitiveCollisionToJsonObject(UPrimitiveComponent* PrimitiveComponent);
     
     // Blueprint utilities
     static UBlueprint* FindBlueprint(const FString& BlueprintName);

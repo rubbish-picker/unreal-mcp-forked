@@ -366,4 +366,153 @@ def register_editor_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
+    @mcp.tool()
+    def open_level(ctx: Context, level_name: str) -> Dict[str, Any]:
+        """
+        Open a level in the Unreal Editor.
+
+        Args:
+            level_name: Level asset path such as /Game/Maps/Lv1, or a map filename
+
+        Returns:
+            Response containing the opened level filename and current world
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("open_level", {
+                "level_name": level_name
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error opening level: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def save_current_level(ctx: Context) -> Dict[str, Any]:
+        """
+        Save the currently open editor level.
+
+        Returns:
+            Response containing the saved world and package
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("save_current_level", {})
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error saving current level: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_object_properties(
+        ctx: Context,
+        object_path: str = "",
+        actor_name: str = "",
+        component_name: str = "",
+        blueprint_name: str = "",
+        max_properties: int = 200
+    ) -> Dict[str, Any]:
+        """Inspect Details-style properties for an object, actor, component, or Blueprint CDO."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("inspect_object_properties", {
+                "object_path": object_path,
+                "actor_name": actor_name,
+                "component_name": component_name,
+                "blueprint_name": blueprint_name,
+                "max_properties": max_properties
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting object properties: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_selected_objects(ctx: Context, max_properties: int = 100) -> Dict[str, Any]:
+        """Inspect currently selected editor objects and their Details-style properties."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("inspect_selected_objects", {
+                "max_properties": max_properties
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting selected objects: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_component_collision(
+        ctx: Context,
+        actor_name: str,
+        component_name: str = ""
+    ) -> Dict[str, Any]:
+        """Inspect collision settings for primitive components on an actor."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("inspect_component_collision", {
+                "actor_name": actor_name,
+                "component_name": component_name
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting component collision: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def find_asset_references(ctx: Context, asset_path: str) -> Dict[str, Any]:
+        """Find package referencers and dependencies for an asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("find_asset_references", {
+                "asset_path": asset_path
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error finding asset references: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
     logger.info("Editor tools registered successfully")

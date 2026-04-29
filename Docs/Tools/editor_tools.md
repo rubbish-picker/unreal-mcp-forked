@@ -8,6 +8,50 @@ Editor tools allow you to control the Unreal Editor viewport and other editor fu
 
 ## Editor Tools
 
+### inspect_object_properties
+
+Inspect Details-style properties for an object, actor, actor component, or Blueprint class default object.
+
+**Parameters:**
+- `object_path` (string, optional) - Full object path to inspect
+- `actor_name` (string, optional) - Actor name in the current level
+- `component_name` (string, optional) - Component name when inspecting an actor or Blueprint component
+- `blueprint_name` (string, optional) - Blueprint asset name or path; inspects the CDO unless `component_name` is supplied
+- `max_properties` (integer, optional) - Maximum number of properties to return
+
+### inspect_selected_objects
+
+Inspect the objects currently selected in the editor.
+
+**Parameters:**
+- `max_properties` (integer, optional) - Maximum number of properties per object
+
+### inspect_component_collision
+
+Inspect collision settings for primitive components on an actor.
+
+**Parameters:**
+- `actor_name` (string) - Actor name in the current level
+- `component_name` (string, optional) - Primitive component name; omitted returns all primitive components
+
+### find_asset_references
+
+Find package referencers and dependencies for an asset.
+
+**Parameters:**
+- `asset_path` (string) - Asset package path such as `/Game/Project101/BluePrint/BP_Door`
+
+### open_level
+
+Open a level in the editor.
+
+**Parameters:**
+- `level_name` (string) - Level package path such as `/Game/Project101/Maps/Lv1`, or a map filename
+
+### save_current_level
+
+Save the currently open editor level.
+
 ### focus_viewport
 
 Focus the viewport on a specific actor or location.

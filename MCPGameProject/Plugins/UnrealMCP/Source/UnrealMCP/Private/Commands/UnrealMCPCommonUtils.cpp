@@ -29,6 +29,67 @@
 #include "Dom/JsonValue.h"
 #include "Misc/PackageName.h"
 
+static TSharedPtr<FJsonValue> ExportPropertyValueToJson(FProperty* Property, const void* Container)
+{
+    if (!Property || !Container)
+    {
+        return MakeShared<FJsonValueNull>();
+    }
+
+    const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+    if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
+    {
+        return MakeShared<FJsonValueBoolean>(BoolProperty->GetPropertyValue(ValuePtr));
+    }
+    if (const FNumericProperty* NumericProperty = CastField<FNumericProperty>(Property))
+    {
+        if (NumericProperty->IsInteger())
+        {
+            return MakeShared<FJsonValueNumber>((double)NumericProperty->GetSignedIntPropertyValue(ValuePtr));
+        }
+        return MakeShared<FJsonValueNumber>(NumericProperty->GetFloatingPointPropertyValue(ValuePtr));
+    }
+    if (const FStrProperty* StringProperty = CastField<FStrProperty>(Property))
+    {
+        return MakeShared<FJsonValueString>(StringProperty->GetPropertyValue(ValuePtr));
+    }
+    if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
+    {
+        return MakeShared<FJsonValueString>(NameProperty->GetPropertyValue(ValuePtr).ToString());
+    }
+    if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
+    {
+        return MakeShared<FJsonValueString>(TextProperty->GetPropertyValue(ValuePtr).ToString());
+    }
+    if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+    {
+        const int64 EnumValue = EnumProperty->GetUnderlyingProperty()->GetSignedIntPropertyValue(ValuePtr);
+        return MakeShared<FJsonValueString>(EnumProperty->GetEnum()->GetNameStringByValue(EnumValue));
+    }
+    if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+    {
+        const uint8 ByteValue = ByteProperty->GetPropertyValue(ValuePtr);
+        if (UEnum* EnumDef = ByteProperty->GetIntPropertyEnum())
+        {
+            return MakeShared<FJsonValueString>(EnumDef->GetNameStringByValue(ByteValue));
+        }
+        return MakeShared<FJsonValueNumber>(ByteValue);
+    }
+    if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+    {
+        UObject* ObjectValue = ObjectProperty->GetObjectPropertyValue(ValuePtr);
+        if (ObjectValue)
+        {
+            return MakeShared<FJsonValueString>(ObjectValue->GetPathName());
+        }
+        return MakeShared<FJsonValueNull>();
+    }
+
+    FString ExportedValue;
+    Property->ExportTextItem_Direct(ExportedValue, ValuePtr, nullptr, nullptr, PPF_None);
+    return MakeShared<FJsonValueString>(ExportedValue);
+}
+
 // JSON Utilities
 TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::CreateErrorResponse(const FString& Message)
 {
@@ -636,8 +697,138 @@ TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::ActorToJsonObject(AActor* Actor, 
     ScaleArray.Add(MakeShared<FJsonValueNumber>(Scale.Y));
     ScaleArray.Add(MakeShared<FJsonValueNumber>(Scale.Z));
     ActorObject->SetArrayField(TEXT("scale"), ScaleArray);
+
+    if (bDetailed)
+    {
+        TArray<TSharedPtr<FJsonValue>> ComponentArray;
+        TArray<UActorComponent*> Components;
+        Actor->GetComponents(Components);
+        for (UActorComponent* Component : Components)
+        {
+            if (!Component)
+            {
+                continue;
+            }
+
+            TSharedPtr<FJsonObject> ComponentObj = ObjectToJsonObject(Component, false);
+            if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
+            {
+                TArray<TSharedPtr<FJsonValue>> RelativeLocationArray;
+                const FVector RelativeLocation = SceneComponent->GetRelativeLocation();
+                RelativeLocationArray.Add(MakeShared<FJsonValueNumber>(RelativeLocation.X));
+                RelativeLocationArray.Add(MakeShared<FJsonValueNumber>(RelativeLocation.Y));
+                RelativeLocationArray.Add(MakeShared<FJsonValueNumber>(RelativeLocation.Z));
+                ComponentObj->SetArrayField(TEXT("relative_location"), RelativeLocationArray);
+            }
+            if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Component))
+            {
+                ComponentObj->SetObjectField(TEXT("collision"), PrimitiveCollisionToJsonObject(PrimitiveComponent));
+            }
+            ComponentArray.Add(MakeShared<FJsonValueObject>(ComponentObj));
+        }
+        ActorObject->SetArrayField(TEXT("components"), ComponentArray);
+        ActorObject->SetObjectField(TEXT("properties"), ObjectPropertiesToJsonObject(Actor, 200));
+    }
     
     return ActorObject;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::ObjectToJsonObject(UObject* Object, bool bIncludeProperties, int32 MaxProperties)
+{
+    if (!Object)
+    {
+        return nullptr;
+    }
+
+    TSharedPtr<FJsonObject> ObjectObj = MakeShared<FJsonObject>();
+    ObjectObj->SetStringField(TEXT("name"), Object->GetName());
+    ObjectObj->SetStringField(TEXT("class"), Object->GetClass() ? Object->GetClass()->GetName() : TEXT(""));
+    ObjectObj->SetStringField(TEXT("path"), Object->GetPathName());
+    ObjectObj->SetStringField(TEXT("outer"), Object->GetOuter() ? Object->GetOuter()->GetPathName() : TEXT(""));
+
+    if (bIncludeProperties)
+    {
+        ObjectObj->SetObjectField(TEXT("properties"), ObjectPropertiesToJsonObject(Object, MaxProperties));
+    }
+
+    return ObjectObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::ObjectPropertiesToJsonObject(UObject* Object, int32 MaxProperties)
+{
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    TArray<TSharedPtr<FJsonValue>> PropertyArray;
+
+    if (!Object || !Object->GetClass())
+    {
+        ResultObj->SetArrayField(TEXT("properties"), PropertyArray);
+        ResultObj->SetNumberField(TEXT("count"), 0);
+        return ResultObj;
+    }
+
+    int32 Count = 0;
+    for (TFieldIterator<FProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
+    {
+        if (MaxProperties > 0 && Count >= MaxProperties)
+        {
+            break;
+        }
+
+        FProperty* Property = *PropIt;
+        if (!Property)
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> PropertyObj = MakeShared<FJsonObject>();
+        PropertyObj->SetStringField(TEXT("name"), Property->GetName());
+        PropertyObj->SetStringField(TEXT("type"), Property->GetCPPType());
+        PropertyObj->SetStringField(TEXT("category"), Property->GetMetaData(TEXT("Category")));
+        PropertyObj->SetBoolField(TEXT("editable"), Property->HasAnyPropertyFlags(CPF_Edit));
+        PropertyObj->SetBoolField(TEXT("blueprint_visible"), Property->HasAnyPropertyFlags(CPF_BlueprintVisible));
+        PropertyObj->SetBoolField(TEXT("transient"), Property->HasAnyPropertyFlags(CPF_Transient));
+        PropertyObj->SetField(TEXT("value"), ExportPropertyValueToJson(Property, Object));
+        PropertyArray.Add(MakeShared<FJsonValueObject>(PropertyObj));
+        ++Count;
+    }
+
+    ResultObj->SetArrayField(TEXT("properties"), PropertyArray);
+    ResultObj->SetNumberField(TEXT("count"), Count);
+    ResultObj->SetBoolField(TEXT("truncated"), MaxProperties > 0 && Count >= MaxProperties);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPCommonUtils::PrimitiveCollisionToJsonObject(UPrimitiveComponent* PrimitiveComponent)
+{
+    TSharedPtr<FJsonObject> CollisionObj = MakeShared<FJsonObject>();
+    if (!PrimitiveComponent)
+    {
+        return CollisionObj;
+    }
+
+    CollisionObj->SetBoolField(TEXT("generate_overlap_events"), PrimitiveComponent->GetGenerateOverlapEvents());
+    CollisionObj->SetStringField(TEXT("collision_profile_name"), PrimitiveComponent->GetCollisionProfileName().ToString());
+    CollisionObj->SetStringField(TEXT("collision_enabled"), UEnum::GetValueAsString(PrimitiveComponent->GetCollisionEnabled()));
+    CollisionObj->SetStringField(TEXT("object_type"), UEnum::GetValueAsString(PrimitiveComponent->GetCollisionObjectType()));
+    CollisionObj->SetStringField(TEXT("mobility"), UEnum::GetValueAsString(PrimitiveComponent->Mobility.GetValue()));
+    CollisionObj->SetBoolField(TEXT("simulate_physics"), PrimitiveComponent->IsSimulatingPhysics());
+
+    TArray<TSharedPtr<FJsonValue>> ChannelResponses;
+    const UEnum* ChannelEnum = StaticEnum<ECollisionChannel>();
+    const FCollisionResponseContainer& ResponseContainer = PrimitiveComponent->GetCollisionResponseToChannels();
+    if (ChannelEnum)
+    {
+        for (int32 ChannelIndex = 0; ChannelIndex < ECollisionChannel::ECC_MAX; ++ChannelIndex)
+        {
+            const ECollisionChannel Channel = static_cast<ECollisionChannel>(ChannelIndex);
+            TSharedPtr<FJsonObject> ResponseObj = MakeShared<FJsonObject>();
+            ResponseObj->SetStringField(TEXT("channel"), ChannelEnum->GetNameStringByValue(ChannelIndex));
+            ResponseObj->SetStringField(TEXT("response"), UEnum::GetValueAsString(ResponseContainer.GetResponse(Channel)));
+            ChannelResponses.Add(MakeShared<FJsonValueObject>(ResponseObj));
+        }
+    }
+    CollisionObj->SetArrayField(TEXT("channel_responses"), ChannelResponses);
+    return CollisionObj;
 }
 
 UK2Node_Event* FUnrealMCPCommonUtils::FindExistingEventNode(UEdGraph* Graph, const FString& EventName)

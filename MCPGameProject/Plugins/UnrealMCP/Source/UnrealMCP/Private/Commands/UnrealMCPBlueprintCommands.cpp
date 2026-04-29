@@ -20,6 +20,33 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
+#include "Engine/TimelineTemplate.h"
+#include "Curves/CurveFloat.h"
+#include "Curves/CurveVector.h"
+#include "Curves/CurveLinearColor.h"
+
+static TSharedPtr<FJsonObject> RichCurveToJsonObject(const FRichCurve& Curve)
+{
+    TSharedPtr<FJsonObject> CurveObj = MakeShared<FJsonObject>();
+    TArray<TSharedPtr<FJsonValue>> KeyArray;
+    for (const FRichCurveKey& Key : Curve.GetConstRefOfKeys())
+    {
+        TSharedPtr<FJsonObject> KeyObj = MakeShared<FJsonObject>();
+        KeyObj->SetNumberField(TEXT("time"), Key.Time);
+        KeyObj->SetNumberField(TEXT("value"), Key.Value);
+        KeyObj->SetStringField(TEXT("interp_mode"), UEnum::GetValueAsString(Key.InterpMode));
+        KeyObj->SetStringField(TEXT("tangent_mode"), UEnum::GetValueAsString(Key.TangentMode));
+        KeyObj->SetStringField(TEXT("tangent_weight_mode"), UEnum::GetValueAsString(Key.TangentWeightMode));
+        KeyObj->SetNumberField(TEXT("arrive_tangent"), Key.ArriveTangent);
+        KeyObj->SetNumberField(TEXT("leave_tangent"), Key.LeaveTangent);
+        KeyObj->SetNumberField(TEXT("arrive_tangent_weight"), Key.ArriveTangentWeight);
+        KeyObj->SetNumberField(TEXT("leave_tangent_weight"), Key.LeaveTangentWeight);
+        KeyArray.Add(MakeShared<FJsonValueObject>(KeyObj));
+    }
+    CurveObj->SetArrayField(TEXT("keys"), KeyArray);
+    CurveObj->SetNumberField(TEXT("key_count"), KeyArray.Num());
+    return CurveObj;
+}
 
 FUnrealMCPBlueprintCommands::FUnrealMCPBlueprintCommands()
 {
@@ -62,6 +89,18 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCommand(const FString
     else if (CommandType == TEXT("set_pawn_properties"))
     {
         return HandleSetPawnProperties(Params);
+    }
+    else if (CommandType == TEXT("inspect_blueprint_components"))
+    {
+        return HandleInspectBlueprintComponents(Params);
+    }
+    else if (CommandType == TEXT("inspect_blueprint_defaults"))
+    {
+        return HandleInspectBlueprintDefaults(Params);
+    }
+    else if (CommandType == TEXT("inspect_blueprint_timelines"))
+    {
+        return HandleInspectBlueprintTimelines(Params);
     }
     
     return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown blueprint command: %s"), *CommandType));
@@ -160,6 +199,222 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCreateBlueprint(const
     }
 
     return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create blueprint"));
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleInspectBlueprintComponents(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    int32 MaxProperties = 100;
+    Params->TryGetNumberField(TEXT("max_properties"), MaxProperties);
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> ComponentArray;
+    if (Blueprint->SimpleConstructionScript)
+    {
+        TArray<USCS_Node*> Nodes = Blueprint->SimpleConstructionScript->GetAllNodes();
+        for (USCS_Node* Node : Nodes)
+        {
+            if (!Node)
+            {
+                continue;
+            }
+
+            UObject* Template = Node->ComponentTemplate;
+            TSharedPtr<FJsonObject> ComponentObj = MakeShared<FJsonObject>();
+            ComponentObj->SetStringField(TEXT("name"), Node->GetVariableName().ToString());
+            ComponentObj->SetStringField(TEXT("class"), Template ? Template->GetClass()->GetName() : TEXT(""));
+            ComponentObj->SetStringField(TEXT("template_path"), Template ? Template->GetPathName() : TEXT(""));
+
+            USCS_Node* ParentNode = nullptr;
+            for (USCS_Node* CandidateParent : Nodes)
+            {
+                if (CandidateParent && CandidateParent->GetChildNodes().Contains(Node))
+                {
+                    ParentNode = CandidateParent;
+                    break;
+                }
+            }
+            if (ParentNode)
+            {
+                ComponentObj->SetStringField(TEXT("parent"), ParentNode->GetVariableName().ToString());
+            }
+
+            if (Template)
+            {
+                ComponentObj->SetObjectField(TEXT("properties"), FUnrealMCPCommonUtils::ObjectPropertiesToJsonObject(Template, MaxProperties));
+                if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(Template))
+                {
+                    ComponentObj->SetObjectField(TEXT("collision"), FUnrealMCPCommonUtils::PrimitiveCollisionToJsonObject(PrimitiveComponent));
+                }
+            }
+
+            ComponentArray.Add(MakeShared<FJsonValueObject>(ComponentObj));
+        }
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    ResultObj->SetArrayField(TEXT("components"), ComponentArray);
+    ResultObj->SetNumberField(TEXT("component_count"), ComponentArray.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleInspectBlueprintDefaults(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    int32 MaxProperties = 200;
+    Params->TryGetNumberField(TEXT("max_properties"), MaxProperties);
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    UObject* DefaultObject = Blueprint->GeneratedClass ? Blueprint->GeneratedClass->GetDefaultObject() : nullptr;
+    if (!DefaultObject)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Blueprint default object not available"));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = FUnrealMCPCommonUtils::ObjectToJsonObject(DefaultObject, true, MaxProperties);
+    ResultObj->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleInspectBlueprintTimelines(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> TimelineArray;
+    for (UTimelineTemplate* Timeline : Blueprint->Timelines)
+    {
+        if (!Timeline)
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> TimelineObj = MakeShared<FJsonObject>();
+        TimelineObj->SetStringField(TEXT("name"), Timeline->GetName());
+        TimelineObj->SetStringField(TEXT("path"), Timeline->GetPathName());
+        TimelineObj->SetStringField(TEXT("guid"), Timeline->TimelineGuid.ToString());
+        TimelineObj->SetNumberField(TEXT("length"), Timeline->TimelineLength);
+        TimelineObj->SetStringField(TEXT("length_mode"), UEnum::GetValueAsString(Timeline->LengthMode.GetValue()));
+        TimelineObj->SetBoolField(TEXT("auto_play"), Timeline->bAutoPlay != 0);
+        TimelineObj->SetBoolField(TEXT("loop"), Timeline->bLoop != 0);
+        TimelineObj->SetBoolField(TEXT("replicated"), Timeline->bReplicated != 0);
+        TimelineObj->SetBoolField(TEXT("ignore_time_dilation"), Timeline->bIgnoreTimeDilation != 0);
+        TimelineObj->SetStringField(TEXT("tick_group"), UEnum::GetValueAsString(Timeline->TimelineTickGroup.GetValue()));
+        TimelineObj->SetStringField(TEXT("update_function"), Timeline->GetUpdateFunctionName().ToString());
+        TimelineObj->SetStringField(TEXT("finished_function"), Timeline->GetFinishedFunctionName().ToString());
+
+        TArray<TSharedPtr<FJsonValue>> FloatTracks;
+        for (const FTTFloatTrack& Track : Timeline->FloatTracks)
+        {
+            TSharedPtr<FJsonObject> TrackObj = MakeShared<FJsonObject>();
+            TrackObj->SetStringField(TEXT("name"), Track.GetTrackName().ToString());
+            TrackObj->SetStringField(TEXT("property_name"), Track.GetPropertyName().ToString());
+            TrackObj->SetBoolField(TEXT("external_curve"), Track.bIsExternalCurve);
+            TrackObj->SetStringField(TEXT("curve"), Track.CurveFloat ? Track.CurveFloat->GetPathName() : TEXT(""));
+            if (Track.CurveFloat)
+            {
+                TrackObj->SetObjectField(TEXT("curve_data"), RichCurveToJsonObject(Track.CurveFloat->FloatCurve));
+            }
+            FloatTracks.Add(MakeShared<FJsonValueObject>(TrackObj));
+        }
+        TimelineObj->SetArrayField(TEXT("float_tracks"), FloatTracks);
+
+        TArray<TSharedPtr<FJsonValue>> EventTracks;
+        for (const FTTEventTrack& Track : Timeline->EventTracks)
+        {
+            TSharedPtr<FJsonObject> TrackObj = MakeShared<FJsonObject>();
+            TrackObj->SetStringField(TEXT("name"), Track.GetTrackName().ToString());
+            TrackObj->SetStringField(TEXT("function_name"), Track.GetFunctionName().ToString());
+            TrackObj->SetBoolField(TEXT("external_curve"), Track.bIsExternalCurve);
+            TrackObj->SetStringField(TEXT("curve"), Track.CurveKeys ? Track.CurveKeys->GetPathName() : TEXT(""));
+            if (Track.CurveKeys)
+            {
+                TrackObj->SetObjectField(TEXT("curve_data"), RichCurveToJsonObject(Track.CurveKeys->FloatCurve));
+            }
+            EventTracks.Add(MakeShared<FJsonValueObject>(TrackObj));
+        }
+        TimelineObj->SetArrayField(TEXT("event_tracks"), EventTracks);
+
+        TArray<TSharedPtr<FJsonValue>> VectorTracks;
+        for (const FTTVectorTrack& Track : Timeline->VectorTracks)
+        {
+            TSharedPtr<FJsonObject> TrackObj = MakeShared<FJsonObject>();
+            TrackObj->SetStringField(TEXT("name"), Track.GetTrackName().ToString());
+            TrackObj->SetStringField(TEXT("property_name"), Track.GetPropertyName().ToString());
+            TrackObj->SetBoolField(TEXT("external_curve"), Track.bIsExternalCurve);
+            TrackObj->SetStringField(TEXT("curve"), Track.CurveVector ? Track.CurveVector->GetPathName() : TEXT(""));
+            if (Track.CurveVector)
+            {
+                TArray<TSharedPtr<FJsonValue>> Curves;
+                for (int32 Index = 0; Index < 3; ++Index)
+                {
+                    Curves.Add(MakeShared<FJsonValueObject>(RichCurveToJsonObject(Track.CurveVector->FloatCurves[Index])));
+                }
+                TrackObj->SetArrayField(TEXT("curve_data"), Curves);
+            }
+            VectorTracks.Add(MakeShared<FJsonValueObject>(TrackObj));
+        }
+        TimelineObj->SetArrayField(TEXT("vector_tracks"), VectorTracks);
+
+        TArray<TSharedPtr<FJsonValue>> ColorTracks;
+        for (const FTTLinearColorTrack& Track : Timeline->LinearColorTracks)
+        {
+            TSharedPtr<FJsonObject> TrackObj = MakeShared<FJsonObject>();
+            TrackObj->SetStringField(TEXT("name"), Track.GetTrackName().ToString());
+            TrackObj->SetStringField(TEXT("property_name"), Track.GetPropertyName().ToString());
+            TrackObj->SetBoolField(TEXT("external_curve"), Track.bIsExternalCurve);
+            TrackObj->SetStringField(TEXT("curve"), Track.CurveLinearColor ? Track.CurveLinearColor->GetPathName() : TEXT(""));
+            if (Track.CurveLinearColor)
+            {
+                TArray<TSharedPtr<FJsonValue>> Curves;
+                for (int32 Index = 0; Index < 4; ++Index)
+                {
+                    Curves.Add(MakeShared<FJsonValueObject>(RichCurveToJsonObject(Track.CurveLinearColor->FloatCurves[Index])));
+                }
+                TrackObj->SetArrayField(TEXT("curve_data"), Curves);
+            }
+            ColorTracks.Add(MakeShared<FJsonValueObject>(TrackObj));
+        }
+        TimelineObj->SetArrayField(TEXT("color_tracks"), ColorTracks);
+
+        TimelineArray.Add(MakeShared<FJsonValueObject>(TimelineObj));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("blueprint_name"), BlueprintName);
+    ResultObj->SetArrayField(TEXT("timelines"), TimelineArray);
+    ResultObj->SetNumberField(TEXT("timeline_count"), TimelineArray.Num());
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleAddComponentToBlueprint(const TSharedPtr<FJsonObject>& Params)

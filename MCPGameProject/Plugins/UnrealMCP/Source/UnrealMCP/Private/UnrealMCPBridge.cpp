@@ -232,7 +232,13 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("set_actor_transform") ||
                      CommandType == TEXT("get_actor_properties") ||
                      CommandType == TEXT("set_actor_property") ||
+                     CommandType == TEXT("inspect_object_properties") ||
+                     CommandType == TEXT("inspect_selected_objects") ||
+                     CommandType == TEXT("inspect_component_collision") ||
+                     CommandType == TEXT("find_asset_references") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
+                     CommandType == TEXT("open_level") ||
+                     CommandType == TEXT("save_current_level") ||
                      CommandType == TEXT("focus_viewport") || 
                      CommandType == TEXT("take_screenshot"))
             {
@@ -246,7 +252,10 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("compile_blueprint") || 
                      CommandType == TEXT("set_blueprint_property") || 
                      CommandType == TEXT("set_static_mesh_properties") ||
-                     CommandType == TEXT("set_pawn_properties"))
+                     CommandType == TEXT("set_pawn_properties") ||
+                     CommandType == TEXT("inspect_blueprint_components") ||
+                     CommandType == TEXT("inspect_blueprint_defaults") ||
+                     CommandType == TEXT("inspect_blueprint_timelines"))
             {
                 ResultJson = BlueprintCommands->HandleCommand(CommandType, Params);
             }
@@ -255,10 +264,14 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("add_blueprint_get_self_component_reference") ||
                      CommandType == TEXT("add_blueprint_self_reference") ||
                      CommandType == TEXT("find_blueprint_nodes") ||
+                     CommandType == TEXT("inspect_blueprint_graph") ||
+                     CommandType == TEXT("remove_blueprint_nodes") ||
                      CommandType == TEXT("add_blueprint_event_node") ||
                      CommandType == TEXT("add_blueprint_input_action_node") ||
                      CommandType == TEXT("add_blueprint_function_node") ||
                      CommandType == TEXT("add_blueprint_get_component_node") ||
+                     CommandType == TEXT("remove_blueprint_component_and_linked_nodes") ||
+                     CommandType == TEXT("remove_blueprint_actor_overlap_nodes") ||
                      CommandType == TEXT("add_blueprint_variable"))
             {
                 ResultJson = BlueprintNodeCommands->HandleCommand(CommandType, Params);
