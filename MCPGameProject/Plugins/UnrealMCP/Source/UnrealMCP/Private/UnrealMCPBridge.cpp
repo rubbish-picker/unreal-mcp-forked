@@ -115,11 +115,17 @@ TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
     Commands.Add(MakeCommand(TEXT("fixup_redirectors"), TEXT("editor"), TEXT("Fix redirectors under a Content Browser folder.")));
     Commands.Add(MakeCommand(TEXT("import_asset"), TEXT("editor"), TEXT("Import one local file into the Content Browser.")));
     Commands.Add(MakeCommand(TEXT("import_assets_batch"), TEXT("editor"), TEXT("Import multiple local files into the Content Browser.")));
+    Commands.Add(MakeCommand(TEXT("inspect_import_options"), TEXT("editor"), TEXT("Report import factories and supported extensions for a source file or extension.")));
     Commands.Add(MakeCommand(TEXT("spawn_mesh_actor_from_asset"), TEXT("editor"), TEXT("Spawn a StaticMeshActor or SkeletalMeshActor from a mesh asset.")));
     Commands.Add(MakeCommand(TEXT("set_actor_mesh_asset"), TEXT("editor"), TEXT("Set a static or skeletal mesh asset on an actor component.")));
     Commands.Add(MakeCommand(TEXT("set_actor_component_property"), TEXT("editor"), TEXT("Set a property on an actor component instance.")));
     Commands.Add(MakeCommand(TEXT("set_actor_component_material"), TEXT("editor"), TEXT("Set a material slot on an actor mesh component.")));
+    Commands.Add(MakeCommand(TEXT("create_material"), TEXT("editor"), TEXT("Create a Material asset.")));
+    Commands.Add(MakeCommand(TEXT("create_material_instance"), TEXT("editor"), TEXT("Create a MaterialInstanceConstant from a parent material.")));
+    Commands.Add(MakeCommand(TEXT("inspect_material_parameters"), TEXT("editor"), TEXT("List scalar, vector, texture, and static switch material parameters.")));
     Commands.Add(MakeCommand(TEXT("set_material_parameter"), TEXT("editor"), TEXT("Set scalar or vector parameters on a Material or MaterialInstanceConstant.")));
+    Commands.Add(MakeCommand(TEXT("set_material_texture_parameter"), TEXT("editor"), TEXT("Set a texture parameter on a Material or MaterialInstanceConstant.")));
+    Commands.Add(MakeCommand(TEXT("set_material_static_switch_parameter"), TEXT("editor"), TEXT("Set a static switch parameter on a Material or MaterialInstance.")));
     Commands.Add(MakeCommand(TEXT("spawn_blueprint_actor"), TEXT("editor"), TEXT("Spawn an actor from a Blueprint.")));
     Commands.Add(MakeCommand(TEXT("open_level"), TEXT("editor"), TEXT("Open an editor level by package path or filename.")));
     Commands.Add(MakeCommand(TEXT("save_current_level"), TEXT("editor"), TEXT("Save the currently open editor level.")));
@@ -341,11 +347,17 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("fixup_redirectors") ||
                      CommandType == TEXT("import_asset") ||
                      CommandType == TEXT("import_assets_batch") ||
+                     CommandType == TEXT("inspect_import_options") ||
                      CommandType == TEXT("spawn_mesh_actor_from_asset") ||
                      CommandType == TEXT("set_actor_mesh_asset") ||
                      CommandType == TEXT("set_actor_component_property") ||
                      CommandType == TEXT("set_actor_component_material") ||
+                     CommandType == TEXT("create_material") ||
+                     CommandType == TEXT("create_material_instance") ||
+                     CommandType == TEXT("inspect_material_parameters") ||
                      CommandType == TEXT("set_material_parameter") ||
+                     CommandType == TEXT("set_material_texture_parameter") ||
+                     CommandType == TEXT("set_material_static_switch_parameter") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
                      CommandType == TEXT("open_level") ||
                      CommandType == TEXT("save_current_level") ||

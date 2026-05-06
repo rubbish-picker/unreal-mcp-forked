@@ -714,6 +714,28 @@ def register_editor_tools(mcp: FastMCP):
             return {"success": False, "message": error_msg}
 
     @mcp.tool()
+    def inspect_import_options(
+        ctx: Context,
+        source_file: str = "",
+        extension: str = ""
+    ) -> Dict[str, Any]:
+        """Report import factories and supported extensions for a source file or extension."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("inspect_import_options", {
+                "source_file": source_file,
+                "extension": extension
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error inspecting import options: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
     def spawn_mesh_actor_from_asset(
         ctx: Context,
         asset_path: str,
@@ -830,6 +852,65 @@ def register_editor_tools(mcp: FastMCP):
             return {"success": False, "message": error_msg}
 
     @mcp.tool()
+    def create_material(ctx: Context, asset_path: str, save: bool = True) -> Dict[str, Any]:
+        """Create a Material asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("create_material", {
+                "asset_path": asset_path,
+                "save": save
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error creating material: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def create_material_instance(
+        ctx: Context,
+        asset_path: str,
+        parent_material_path: str,
+        save: bool = True
+    ) -> Dict[str, Any]:
+        """Create a MaterialInstanceConstant from a parent material."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("create_material_instance", {
+                "asset_path": asset_path,
+                "parent_material_path": parent_material_path,
+                "save": save
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error creating material instance: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_material_parameters(ctx: Context, material_path: str) -> Dict[str, Any]:
+        """List scalar, vector, texture, and static switch material parameters."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("inspect_material_parameters", {
+                "material_path": material_path
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error inspecting material parameters: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
     def set_material_parameter(
         ctx: Context,
         material_path: str,
@@ -855,6 +936,54 @@ def register_editor_tools(mcp: FastMCP):
 
         except Exception as e:
             error_msg = f"Error setting material parameter: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_material_texture_parameter(
+        ctx: Context,
+        material_path: str,
+        parameter_name: str,
+        texture_path: str
+    ) -> Dict[str, Any]:
+        """Set a texture parameter on a Material or MaterialInstanceConstant asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("set_material_texture_parameter", {
+                "material_path": material_path,
+                "parameter_name": parameter_name,
+                "texture_path": texture_path
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error setting material texture parameter: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_material_static_switch_parameter(
+        ctx: Context,
+        material_path: str,
+        parameter_name: str,
+        value: bool
+    ) -> Dict[str, Any]:
+        """Set a static switch parameter on a Material or MaterialInstance asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("set_material_static_switch_parameter", {
+                "material_path": material_path,
+                "parameter_name": parameter_name,
+                "value": value
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error setting material static switch parameter: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 

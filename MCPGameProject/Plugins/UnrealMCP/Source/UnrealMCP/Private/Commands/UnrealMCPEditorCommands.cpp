@@ -35,6 +35,8 @@
 #include "AssetImportTask.h"
 #include "Factories/Factory.h"
 #include "Factories/FbxFactory.h"
+#include "Factories/MaterialFactoryNew.h"
+#include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "Factories/TextureFactory.h"
 #include "UObject/ObjectRedirector.h"
 #include "Engine/StaticMesh.h"
@@ -43,6 +45,8 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialParameters.h"
+#include "UObject/Package.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -135,6 +139,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     {
         return HandleImportAssetsBatch(Params);
     }
+    else if (CommandType == TEXT("inspect_import_options"))
+    {
+        return HandleInspectImportOptions(Params);
+    }
     else if (CommandType == TEXT("spawn_mesh_actor_from_asset"))
     {
         return HandleSpawnMeshActorFromAsset(Params);
@@ -151,9 +159,29 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     {
         return HandleSetActorComponentMaterial(Params);
     }
+    else if (CommandType == TEXT("create_material"))
+    {
+        return HandleCreateMaterial(Params);
+    }
+    else if (CommandType == TEXT("create_material_instance"))
+    {
+        return HandleCreateMaterialInstance(Params);
+    }
+    else if (CommandType == TEXT("inspect_material_parameters"))
+    {
+        return HandleInspectMaterialParameters(Params);
+    }
     else if (CommandType == TEXT("set_material_parameter"))
     {
         return HandleSetMaterialParameter(Params);
+    }
+    else if (CommandType == TEXT("set_material_texture_parameter"))
+    {
+        return HandleSetMaterialTextureParameter(Params);
+    }
+    else if (CommandType == TEXT("set_material_static_switch_parameter"))
+    {
+        return HandleSetMaterialStaticSwitchParameter(Params);
     }
     // Blueprint actor spawning
     else if (CommandType == TEXT("spawn_blueprint_actor"))
@@ -1245,6 +1273,86 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleImportAssetsBatch(const 
     return ResultObj;
 }
 
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleInspectImportOptions(const TSharedPtr<FJsonObject>& Params)
+{
+    FString SourceFile;
+    Params->TryGetStringField(TEXT("source_file"), SourceFile);
+    Params->TryGetStringField(TEXT("filename"), SourceFile);
+    Params->TryGetStringField(TEXT("file_path"), SourceFile);
+
+    FString Extension;
+    Params->TryGetStringField(TEXT("extension"), Extension);
+    if (Extension.IsEmpty() && !SourceFile.IsEmpty())
+    {
+        Extension = FPaths::GetExtension(SourceFile);
+    }
+    Extension.RemoveFromStart(TEXT("."));
+    Extension = Extension.ToLower();
+
+    TArray<UFactory*> Factories;
+    for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+    {
+        UClass* FactoryClass = *ClassIt;
+        if (!FactoryClass || FactoryClass->HasAnyClassFlags(CLASS_Abstract) || !FactoryClass->IsChildOf(UFactory::StaticClass()))
+        {
+            continue;
+        }
+
+        UFactory* Factory = NewObject<UFactory>(GetTransientPackage(), FactoryClass);
+        if (Factory && Factory->GetFormats().Num() > 0)
+        {
+            Factories.Add(Factory);
+        }
+    }
+
+    TArray<TSharedPtr<FJsonValue>> FactoryArray;
+    for (UFactory* Factory : Factories)
+    {
+        bool bMatchesExtension = Extension.IsEmpty();
+        TArray<TSharedPtr<FJsonValue>> FormatArray;
+        for (const FString& Format : Factory->GetFormats())
+        {
+            FString FormatExtension;
+            FString Description;
+            Format.Split(TEXT(";"), &FormatExtension, &Description);
+            FormatExtension = FormatExtension.ToLower();
+            if (!Extension.IsEmpty() && FormatExtension == Extension)
+            {
+                bMatchesExtension = true;
+            }
+
+            TSharedPtr<FJsonObject> FormatObj = MakeShared<FJsonObject>();
+            FormatObj->SetStringField(TEXT("extension"), FormatExtension);
+            FormatObj->SetStringField(TEXT("description"), Description);
+            FormatObj->SetStringField(TEXT("raw"), Format);
+            FormatArray.Add(MakeShared<FJsonValueObject>(FormatObj));
+        }
+
+        if (!bMatchesExtension)
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> FactoryObj = MakeShared<FJsonObject>();
+        FactoryObj->SetStringField(TEXT("factory_class"), Factory->GetClass()->GetName());
+        FactoryObj->SetStringField(TEXT("factory_path"), Factory->GetClass()->GetPathName());
+        UClass* SupportedClass = Factory->ResolveSupportedClass();
+        FactoryObj->SetStringField(TEXT("supported_class"), SupportedClass ? SupportedClass->GetName() : TEXT(""));
+        FactoryObj->SetBoolField(TEXT("can_create_new"), Factory->CanCreateNew());
+        FactoryObj->SetBoolField(TEXT("can_import_source_file"), !SourceFile.IsEmpty() ? Factory->FactoryCanImport(SourceFile) : false);
+        FactoryObj->SetArrayField(TEXT("formats"), FormatArray);
+        FactoryArray.Add(MakeShared<FJsonValueObject>(FactoryObj));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("source_file"), SourceFile);
+    ResultObj->SetStringField(TEXT("extension"), Extension);
+    ResultObj->SetArrayField(TEXT("factories"), FactoryArray);
+    ResultObj->SetNumberField(TEXT("factory_count"), FactoryArray.Num());
+    ResultObj->SetStringField(TEXT("note"), TEXT("This reports import factories and supported extensions. Per-format UI option objects are factory-specific and not fully enumerated yet."));
+    return ResultObj;
+}
+
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnMeshActorFromAsset(const TSharedPtr<FJsonObject>& Params)
 {
     FString AssetPath;
@@ -1541,6 +1649,265 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorComponentMateria
     return FUnrealMCPCommonUtils::ActorToJsonObject(TargetActor, true);
 }
 
+static bool SplitAssetPathForCreation(const FString& AssetPath, FString& OutPackagePath, FString& OutAssetName, FString& OutError)
+{
+    if (!AssetPath.StartsWith(TEXT("/Game/")))
+    {
+        OutError = TEXT("asset_path must be under /Game");
+        return false;
+    }
+
+    OutPackagePath = FPackageName::GetLongPackagePath(AssetPath);
+    OutAssetName = FPackageName::GetLongPackageAssetName(AssetPath);
+    if (OutPackagePath.IsEmpty() || OutAssetName.IsEmpty())
+    {
+        OutError = FString::Printf(TEXT("Invalid asset_path: %s"), *AssetPath);
+        return false;
+    }
+    return true;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCreateMaterial(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    FString PackagePath;
+    FString AssetName;
+    FString Error;
+    if (!SplitAssetPathForCreation(AssetPath, PackagePath, AssetName, Error))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(Error);
+    }
+
+    if (!UEditorAssetLibrary::DoesDirectoryExist(PackagePath))
+    {
+        UEditorAssetLibrary::MakeDirectory(PackagePath);
+    }
+
+    UMaterialFactoryNew* Factory = NewObject<UMaterialFactoryNew>();
+    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+    UObject* NewAsset = AssetToolsModule.Get().CreateAsset(AssetName, PackagePath, UMaterial::StaticClass(), Factory);
+    UMaterial* Material = Cast<UMaterial>(NewAsset);
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to create material: %s"), *AssetPath));
+    }
+
+    Material->MarkPackageDirty();
+    bool bSave = true;
+    Params->TryGetBoolField(TEXT("save"), bSave);
+    if (bSave)
+    {
+        UEditorAssetLibrary::SaveLoadedAsset(Material, false);
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = FUnrealMCPCommonUtils::ObjectToJsonObject(Material, false);
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetBoolField(TEXT("saved"), bSave);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCreateMaterialInstance(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    FString ParentMaterialPath;
+    if (!Params->TryGetStringField(TEXT("parent_material_path"), ParentMaterialPath) &&
+        !Params->TryGetStringField(TEXT("parent_path"), ParentMaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'parent_material_path' parameter"));
+    }
+
+    UMaterialInterface* ParentMaterial = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(ParentMaterialPath));
+    if (!ParentMaterial)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parent material not found: %s"), *ParentMaterialPath));
+    }
+
+    FString PackagePath;
+    FString AssetName;
+    FString Error;
+    if (!SplitAssetPathForCreation(AssetPath, PackagePath, AssetName, Error))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(Error);
+    }
+
+    if (!UEditorAssetLibrary::DoesDirectoryExist(PackagePath))
+    {
+        UEditorAssetLibrary::MakeDirectory(PackagePath);
+    }
+
+    UMaterialInstanceConstantFactoryNew* Factory = NewObject<UMaterialInstanceConstantFactoryNew>();
+    Factory->InitialParent = ParentMaterial;
+
+    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+    UObject* NewAsset = AssetToolsModule.Get().CreateAsset(AssetName, PackagePath, UMaterialInstanceConstant::StaticClass(), Factory);
+    UMaterialInstanceConstant* MaterialInstance = Cast<UMaterialInstanceConstant>(NewAsset);
+    if (!MaterialInstance)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to create material instance: %s"), *AssetPath));
+    }
+
+    MaterialInstance->SetParentEditorOnly(ParentMaterial);
+    MaterialInstance->PostEditChange();
+    MaterialInstance->MarkPackageDirty();
+
+    bool bSave = true;
+    Params->TryGetBoolField(TEXT("save"), bSave);
+    if (bSave)
+    {
+        UEditorAssetLibrary::SaveLoadedAsset(MaterialInstance, false);
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = FUnrealMCPCommonUtils::ObjectToJsonObject(MaterialInstance, false);
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetStringField(TEXT("parent_material_path"), ParentMaterialPath);
+    ResultObj->SetBoolField(TEXT("saved"), bSave);
+    return ResultObj;
+}
+
+static TSharedPtr<FJsonObject> MaterialParameterInfoToJson(const FMaterialParameterInfo& ParameterInfo, const FGuid& ParameterId)
+{
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    Obj->SetStringField(TEXT("name"), ParameterInfo.Name.ToString());
+    Obj->SetStringField(TEXT("association"), StaticEnum<EMaterialParameterAssociation>()->GetNameStringByValue(ParameterInfo.Association));
+    Obj->SetNumberField(TEXT("index"), ParameterInfo.Index);
+    Obj->SetStringField(TEXT("id"), ParameterId.ToString(EGuidFormats::DigitsWithHyphens));
+    return Obj;
+}
+
+static void AddMaterialParameterArray(
+    UMaterialInterface* Material,
+    const FString& TypeName,
+    const TArray<FMaterialParameterInfo>& Infos,
+    const TArray<FGuid>& Ids,
+    TSharedPtr<FJsonObject> ResultObj)
+{
+    TArray<TSharedPtr<FJsonValue>> Parameters;
+    for (int32 Index = 0; Index < Infos.Num(); ++Index)
+    {
+        const FMaterialParameterInfo& Info = Infos[Index];
+        const FGuid Id = Ids.IsValidIndex(Index) ? Ids[Index] : FGuid();
+        TSharedPtr<FJsonObject> ParamObj = MaterialParameterInfoToJson(Info, Id);
+
+        if (TypeName == TEXT("scalar"))
+        {
+            float Value = 0.0f;
+            if (Material->GetScalarParameterValue(FHashedMaterialParameterInfo(Info), Value))
+            {
+                ParamObj->SetNumberField(TEXT("value"), Value);
+            }
+        }
+        else if (TypeName == TEXT("vector"))
+        {
+            FLinearColor Value;
+            if (Material->GetVectorParameterValue(FHashedMaterialParameterInfo(Info), Value))
+            {
+                TArray<TSharedPtr<FJsonValue>> ColorArray;
+                ColorArray.Add(MakeShared<FJsonValueNumber>(Value.R));
+                ColorArray.Add(MakeShared<FJsonValueNumber>(Value.G));
+                ColorArray.Add(MakeShared<FJsonValueNumber>(Value.B));
+                ColorArray.Add(MakeShared<FJsonValueNumber>(Value.A));
+                ParamObj->SetArrayField(TEXT("value"), ColorArray);
+            }
+        }
+        else if (TypeName == TEXT("texture"))
+        {
+            UTexture* Value = nullptr;
+            if (Material->GetTextureParameterValue(FHashedMaterialParameterInfo(Info), Value))
+            {
+                ParamObj->SetStringField(TEXT("value"), Value ? Value->GetPathName() : TEXT(""));
+            }
+        }
+        else if (TypeName == TEXT("static_switch"))
+        {
+            bool Value = false;
+            FGuid ExpressionGuid;
+            if (Material->GetStaticSwitchParameterValue(FHashedMaterialParameterInfo(Info), Value, ExpressionGuid))
+            {
+                ParamObj->SetBoolField(TEXT("value"), Value);
+                ParamObj->SetStringField(TEXT("expression_guid"), ExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens));
+            }
+        }
+
+        Parameters.Add(MakeShared<FJsonValueObject>(ParamObj));
+    }
+    ResultObj->SetArrayField(TypeName + TEXT("_parameters"), Parameters);
+    ResultObj->SetNumberField(TypeName + TEXT("_count"), Parameters.Num());
+}
+
+static bool MaterialHasParameterOfType(UMaterialInterface* Material, EMaterialParameterType Type, const FName& ParameterName)
+{
+    if (!Material)
+    {
+        return false;
+    }
+
+    TArray<FMaterialParameterInfo> Infos;
+    TArray<FGuid> Ids;
+    Material->GetAllParameterInfoOfType(Type, Infos, Ids);
+    for (const FMaterialParameterInfo& Info : Infos)
+    {
+        if (Info.Name == ParameterName)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleInspectMaterialParameters(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    UMaterialInterface* Material = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found: %s"), *MaterialPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetStringField(TEXT("class"), Material->GetClass()->GetName());
+
+    TArray<FMaterialParameterInfo> Infos;
+    TArray<FGuid> Ids;
+
+    Infos.Reset();
+    Ids.Reset();
+    Material->GetAllScalarParameterInfo(Infos, Ids);
+    AddMaterialParameterArray(Material, TEXT("scalar"), Infos, Ids, ResultObj);
+
+    Infos.Reset();
+    Ids.Reset();
+    Material->GetAllVectorParameterInfo(Infos, Ids);
+    AddMaterialParameterArray(Material, TEXT("vector"), Infos, Ids, ResultObj);
+
+    Infos.Reset();
+    Ids.Reset();
+    Material->GetAllTextureParameterInfo(Infos, Ids);
+    AddMaterialParameterArray(Material, TEXT("texture"), Infos, Ids, ResultObj);
+
+    Infos.Reset();
+    Ids.Reset();
+    Material->GetAllStaticSwitchParameterInfo(Infos, Ids);
+    AddMaterialParameterArray(Material, TEXT("static_switch"), Infos, Ids, ResultObj);
+
+    return ResultObj;
+}
+
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialParameter(const TSharedPtr<FJsonObject>& Params)
 {
     FString MaterialPath;
@@ -1567,6 +1934,12 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialParameter(con
     bool bSet = false;
     if (ParameterType.Equals(TEXT("scalar"), ESearchCase::IgnoreCase))
     {
+        UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(Asset);
+        if (!MaterialHasParameterOfType(MaterialInterface, EMaterialParameterType::Scalar, FName(*ParameterName)))
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Scalar parameter not found: %s"), *ParameterName));
+        }
+
         double NumberValue = 0.0;
         if (!Params->TryGetNumberField(TEXT("value"), NumberValue))
         {
@@ -1585,6 +1958,12 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialParameter(con
     }
     else if (ParameterType.Equals(TEXT("vector"), ESearchCase::IgnoreCase))
     {
+        UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(Asset);
+        if (!MaterialHasParameterOfType(MaterialInterface, EMaterialParameterType::Vector, FName(*ParameterName)))
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Vector parameter not found: %s"), *ParameterName));
+        }
+
         const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
         if (!Params->TryGetArrayField(TEXT("value"), ValueArray) || !ValueArray || ValueArray->Num() < 3)
         {
@@ -1613,6 +1992,7 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialParameter(con
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to set material parameter. For raw materials, the named parameter must already exist."));
     }
 
+    Asset->PostEditChange();
     Asset->MarkPackageDirty();
     UEditorAssetLibrary::SaveLoadedAsset(Asset, false);
 
@@ -1620,6 +2000,142 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialParameter(con
     ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
     ResultObj->SetStringField(TEXT("parameter_name"), ParameterName);
     ResultObj->SetStringField(TEXT("parameter_type"), ParameterType);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialTextureParameter(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    FString ParameterName;
+    if (!Params->TryGetStringField(TEXT("parameter_name"), ParameterName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'parameter_name' parameter"));
+    }
+
+    FString TexturePath;
+    if (!Params->TryGetStringField(TEXT("texture_path"), TexturePath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'texture_path' parameter"));
+    }
+
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(MaterialPath);
+    if (!Asset)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found: %s"), *MaterialPath));
+    }
+
+    UTexture* Texture = Cast<UTexture>(UEditorAssetLibrary::LoadAsset(TexturePath));
+    if (!Texture)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Texture asset not found: %s"), *TexturePath));
+    }
+
+    bool bSet = false;
+    UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(Asset);
+    if (!MaterialHasParameterOfType(MaterialInterface, EMaterialParameterType::Texture, FName(*ParameterName)))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Texture parameter not found: %s"), *ParameterName));
+    }
+
+    if (UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(Asset))
+    {
+        MIC->SetTextureParameterValueEditorOnly(FMaterialParameterInfo(FName(*ParameterName)), Texture);
+        bSet = true;
+    }
+    else if (UMaterial* Material = Cast<UMaterial>(Asset))
+    {
+        bSet = Material->SetTextureParameterValueEditorOnly(FName(*ParameterName), Texture);
+    }
+
+    if (!bSet)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to set texture parameter. For raw materials, the named parameter must already exist."));
+    }
+
+    Asset->PostEditChange();
+    Asset->MarkPackageDirty();
+    UEditorAssetLibrary::SaveLoadedAsset(Asset, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetStringField(TEXT("parameter_name"), ParameterName);
+    ResultObj->SetStringField(TEXT("texture_path"), TexturePath);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialStaticSwitchParameter(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    FString ParameterName;
+    if (!Params->TryGetStringField(TEXT("parameter_name"), ParameterName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'parameter_name' parameter"));
+    }
+
+    bool Value = false;
+    if (!Params->TryGetBoolField(TEXT("value"), Value))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing boolean 'value' parameter"));
+    }
+
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(MaterialPath);
+    if (!Asset)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found: %s"), *MaterialPath));
+    }
+
+    bool bSet = false;
+    UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(Asset);
+    if (!MaterialHasParameterOfType(MaterialInterface, EMaterialParameterType::StaticSwitch, FName(*ParameterName)))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Static switch parameter not found: %s"), *ParameterName));
+    }
+
+    if (UMaterialInstance* MaterialInstance = Cast<UMaterialInstance>(Asset))
+    {
+        MaterialInstance->SetStaticSwitchParameterValueEditorOnly(FMaterialParameterInfo(FName(*ParameterName)), Value);
+        bSet = true;
+    }
+    else if (UMaterial* Material = Cast<UMaterial>(Asset))
+    {
+        TArray<FMaterialParameterInfo> Infos;
+        TArray<FGuid> Ids;
+        Material->GetAllStaticSwitchParameterInfo(Infos, Ids);
+        FGuid ExpressionGuid;
+        for (int32 Index = 0; Index < Infos.Num(); ++Index)
+        {
+            if (Infos[Index].Name == FName(*ParameterName))
+            {
+                ExpressionGuid = Ids.IsValidIndex(Index) ? Ids[Index] : FGuid();
+                break;
+            }
+        }
+        bSet = Material->SetStaticSwitchParameterValueEditorOnly(FName(*ParameterName), Value, ExpressionGuid);
+    }
+
+    if (!bSet)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to set static switch parameter. The named static switch must exist."));
+    }
+
+    Asset->PostEditChange();
+    Asset->MarkPackageDirty();
+    UEditorAssetLibrary::SaveLoadedAsset(Asset, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetStringField(TEXT("parameter_name"), ParameterName);
+    ResultObj->SetBoolField(TEXT("value"), Value);
     return ResultObj;
 }
 

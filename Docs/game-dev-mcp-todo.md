@@ -17,7 +17,7 @@ This checklist tracks low-level MCP capabilities needed to build real Unreal gam
 - [x] `delete_asset`: delete an asset.
 - [x] `save_asset`: save one loaded asset.
 - [x] `fixup_redirectors`: fix redirectors under a path.
-- [ ] Smoke tests:
+- [x] Smoke tests:
 - [x] Create `/Game/MCP_Test`.
 - [x] Duplicate `/Engine/BasicShapes/Cube` into it as `/Game/MCP_Test/MCP_Test_Cube`.
 - [x] Rename/move the duplicate to `/Game/MCP_Test/MCP_Test_Cube_Renamed`.
@@ -29,24 +29,28 @@ This checklist tracks low-level MCP capabilities needed to build real Unreal gam
 
 - [x] `import_asset`: import FBX/PNG/WAV/etc. from local disk.
 - [x] `import_assets_batch`: import multiple files.
-- [ ] `inspect_import_options`: report supported import options.
-- [ ] Smoke tests:
+- [x] `inspect_import_options`: report supported import options.
+- [x] Smoke tests:
 - [x] Import a tiny generated texture.
 - [x] Verify asset exists.
 - [x] Delete imported test asset.
+- [x] Inspect PNG import factory/options.
 
 ## Batch 3: Materials
 
-- [ ] `create_material`: create a Material asset.
-- [ ] `create_material_instance`: create a MaterialInstanceConstant from a parent material.
-- [ ] `inspect_material_parameters`: list scalar/vector/texture/static switch parameters.
-- [ ] `set_material_texture_parameter`: set texture parameter.
-- [ ] `set_material_static_switch_parameter`: set static switch parameter.
+- [x] `create_material`: create a Material asset.
+- [x] `create_material_instance`: create a MaterialInstanceConstant from a parent material.
+- [x] `inspect_material_parameters`: list scalar/vector/texture/static switch parameters.
+- [x] `set_material_texture_parameter`: set texture parameter.
+- [x] `set_material_static_switch_parameter`: set static switch parameter.
 - [ ] Optional later: material graph node creation and connection.
 - [ ] Smoke tests:
 - [ ] Create a material instance from a known engine material.
-- [ ] Set scalar/vector parameters when present.
-- [ ] Save/delete test material instance.
+- [x] Create and delete a temporary Material.
+- [x] Create, save, inspect, and delete a temporary MaterialInstanceConstant.
+- [x] Verify missing scalar/texture/static switch parameters return explicit errors.
+- [ ] Set scalar/vector/texture/static switch parameters on a material that actually exposes them.
+- [x] Save/delete test material instance.
 
 ## Batch 4: Enhanced Input
 

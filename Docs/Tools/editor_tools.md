@@ -123,6 +123,14 @@ Import multiple local files into the Content Browser.
 **Parameters:**
 - `assets` (array) - Import specs using the same fields as `import_asset`
 
+### inspect_import_options
+
+Report import factories and supported extensions for a source file or extension.
+
+**Parameters:**
+- `source_file` (string, optional) - Local file path to probe
+- `extension` (string, optional) - Extension to probe, for example `png`
+
 ### spawn_mesh_actor_from_asset
 
 Spawn a `StaticMeshActor` or `SkeletalMeshActor` from a mesh asset.
@@ -161,6 +169,30 @@ Set a material slot on an actor mesh component.
 - `component_name` (string, optional) - Mesh component name
 - `material_index` (integer, optional) - Material slot index
 
+### create_material
+
+Create a Material asset.
+
+**Parameters:**
+- `asset_path` (string) - New material path under `/Game`
+- `save` (boolean, optional) - Save after creation
+
+### create_material_instance
+
+Create a MaterialInstanceConstant from a parent material.
+
+**Parameters:**
+- `asset_path` (string) - New material instance path under `/Game`
+- `parent_material_path` (string) - Parent Material or MaterialInstance path
+- `save` (boolean, optional) - Save after creation
+
+### inspect_material_parameters
+
+List scalar, vector, texture, and static switch material parameters.
+
+**Parameters:**
+- `material_path` (string) - Material or MaterialInstance path
+
 ### set_material_parameter
 
 Set scalar or vector parameters on a `Material` or `MaterialInstanceConstant`.
@@ -170,6 +202,24 @@ Set scalar or vector parameters on a `Material` or `MaterialInstanceConstant`.
 - `parameter_name` (string) - Existing parameter name, for example `Metallic`
 - `parameter_type` (string, optional) - `scalar` or `vector`
 - `value` (number or array) - Scalar number or `[R,G,B,A]`
+
+### set_material_texture_parameter
+
+Set a texture parameter on a Material or MaterialInstanceConstant.
+
+**Parameters:**
+- `material_path` (string) - Material or MaterialInstance path
+- `parameter_name` (string) - Texture parameter name
+- `texture_path` (string) - Texture asset path
+
+### set_material_static_switch_parameter
+
+Set a static switch parameter on a Material or MaterialInstance.
+
+**Parameters:**
+- `material_path` (string) - Material or MaterialInstance path
+- `parameter_name` (string) - Static switch parameter name
+- `value` (boolean) - Switch value
 
 ### open_level
 
