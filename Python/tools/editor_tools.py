@@ -569,6 +569,151 @@ def register_editor_tools(mcp: FastMCP):
             return {"success": False, "message": error_msg}
 
     @mcp.tool()
+    def create_content_folder(ctx: Context, folder_path: str) -> Dict[str, Any]:
+        """Create a Content Browser folder under /Game."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("create_content_folder", {"folder_path": folder_path}) or {}
+        except Exception as e:
+            error_msg = f"Error creating content folder: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def duplicate_asset(ctx: Context, source_asset_path: str, destination_asset_path: str) -> Dict[str, Any]:
+        """Duplicate an asset to a destination path."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("duplicate_asset", {
+                "source_asset_path": source_asset_path,
+                "destination_asset_path": destination_asset_path
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error duplicating asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def rename_asset(ctx: Context, source_asset_path: str, destination_asset_path: str) -> Dict[str, Any]:
+        """Rename or move an asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("rename_asset", {
+                "source_asset_path": source_asset_path,
+                "destination_asset_path": destination_asset_path
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error renaming asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def delete_asset(ctx: Context, asset_path: str) -> Dict[str, Any]:
+        """Delete an asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("delete_asset", {"asset_path": asset_path}) or {}
+        except Exception as e:
+            error_msg = f"Error deleting asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def save_asset(ctx: Context, asset_path: str, only_if_dirty: bool = True) -> Dict[str, Any]:
+        """Save one loaded asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("save_asset", {
+                "asset_path": asset_path,
+                "only_if_dirty": only_if_dirty
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error saving asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def fixup_redirectors(ctx: Context, folder_path: str = "/Game", recursive: bool = True) -> Dict[str, Any]:
+        """Fix redirectors under a Content Browser folder."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("fixup_redirectors", {
+                "folder_path": folder_path,
+                "recursive": recursive
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error fixing redirectors: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def import_asset(
+        ctx: Context,
+        source_file: str,
+        destination_path: str = "/Game",
+        destination_name: str = "",
+        replace_existing: bool = True,
+        save: bool = True
+    ) -> Dict[str, Any]:
+        """Import one local file into the Content Browser."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("import_asset", {
+                "source_file": source_file,
+                "destination_path": destination_path,
+                "destination_name": destination_name,
+                "replace_existing": replace_existing,
+                "save": save
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error importing asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def import_assets_batch(ctx: Context, assets: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Import multiple local files into the Content Browser."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("import_assets_batch", {"assets": assets}) or {}
+        except Exception as e:
+            error_msg = f"Error importing assets batch: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
     def spawn_mesh_actor_from_asset(
         ctx: Context,
         asset_path: str,
@@ -623,6 +768,35 @@ def register_editor_tools(mcp: FastMCP):
 
         except Exception as e:
             error_msg = f"Error setting actor mesh asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_actor_component_property(
+        ctx: Context,
+        actor_name: str,
+        component_name: str,
+        property_name: str,
+        property_value
+    ) -> Dict[str, Any]:
+        """Set a property on an actor component instance."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("set_actor_component_property", {
+                "actor_name": actor_name,
+                "component_name": component_name,
+                "property_name": property_name,
+                "property_value": property_value
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error setting actor component property: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 

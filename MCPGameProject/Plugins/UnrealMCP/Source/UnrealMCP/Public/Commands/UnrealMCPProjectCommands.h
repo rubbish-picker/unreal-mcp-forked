@@ -17,5 +17,6 @@ public:
 private:
     // Specific project command handlers
     TSharedPtr<FJsonObject> HandleCreateInputMapping(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleRemoveInputMapping(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleInspectInputMappings(const TSharedPtr<FJsonObject>& Params);
 }; 

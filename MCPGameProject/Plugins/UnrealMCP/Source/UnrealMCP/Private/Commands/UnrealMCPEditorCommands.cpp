@@ -30,9 +30,16 @@
 #include "Engine/SCS_Node.h"
 #include "Components/PrimitiveComponent.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetToolsModule.h"
 #include "EditorAssetLibrary.h"
+#include "AssetImportTask.h"
+#include "Factories/Factory.h"
+#include "Factories/FbxFactory.h"
+#include "Factories/TextureFactory.h"
+#include "UObject/ObjectRedirector.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
@@ -96,6 +103,38 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     {
         return HandleListAssetsByClass(Params);
     }
+    else if (CommandType == TEXT("create_content_folder"))
+    {
+        return HandleCreateContentFolder(Params);
+    }
+    else if (CommandType == TEXT("duplicate_asset"))
+    {
+        return HandleDuplicateAsset(Params);
+    }
+    else if (CommandType == TEXT("rename_asset"))
+    {
+        return HandleRenameAsset(Params);
+    }
+    else if (CommandType == TEXT("delete_asset"))
+    {
+        return HandleDeleteAsset(Params);
+    }
+    else if (CommandType == TEXT("save_asset"))
+    {
+        return HandleSaveAsset(Params);
+    }
+    else if (CommandType == TEXT("fixup_redirectors"))
+    {
+        return HandleFixupRedirectors(Params);
+    }
+    else if (CommandType == TEXT("import_asset"))
+    {
+        return HandleImportAsset(Params);
+    }
+    else if (CommandType == TEXT("import_assets_batch"))
+    {
+        return HandleImportAssetsBatch(Params);
+    }
     else if (CommandType == TEXT("spawn_mesh_actor_from_asset"))
     {
         return HandleSpawnMeshActorFromAsset(Params);
@@ -103,6 +142,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("set_actor_mesh_asset"))
     {
         return HandleSetActorMeshAsset(Params);
+    }
+    else if (CommandType == TEXT("set_actor_component_property"))
+    {
+        return HandleSetActorComponentProperty(Params);
     }
     else if (CommandType == TEXT("set_actor_component_material"))
     {
@@ -708,6 +751,29 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleListAssetsByClass(const 
     UClass* AssetClass = FUnrealMCPCommonUtils::FindClassByName(ClassName);
     if (!AssetClass)
     {
+        if (ClassName.Equals(TEXT("Texture2D"), ESearchCase::IgnoreCase))
+        {
+            AssetClass = UTexture2D::StaticClass();
+        }
+        else if (ClassName.Equals(TEXT("StaticMesh"), ESearchCase::IgnoreCase))
+        {
+            AssetClass = UStaticMesh::StaticClass();
+        }
+        else if (ClassName.Equals(TEXT("SkeletalMesh"), ESearchCase::IgnoreCase))
+        {
+            AssetClass = USkeletalMesh::StaticClass();
+        }
+        else if (ClassName.Equals(TEXT("Material"), ESearchCase::IgnoreCase))
+        {
+            AssetClass = UMaterial::StaticClass();
+        }
+        else if (ClassName.Equals(TEXT("MaterialInstanceConstant"), ESearchCase::IgnoreCase))
+        {
+            AssetClass = UMaterialInstanceConstant::StaticClass();
+        }
+    }
+    if (!AssetClass)
+    {
         return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset class not found: %s"), *ClassName));
     }
 
@@ -749,6 +815,433 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleListAssetsByClass(const 
     ResultObj->SetStringField(TEXT("path"), PackagePath);
     ResultObj->SetArrayField(TEXT("assets"), AssetArray);
     ResultObj->SetNumberField(TEXT("count"), AssetArray.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCreateContentFolder(const TSharedPtr<FJsonObject>& Params)
+{
+    FString FolderPath;
+    if (!Params->TryGetStringField(TEXT("folder_path"), FolderPath) &&
+        !Params->TryGetStringField(TEXT("path"), FolderPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'folder_path' parameter"));
+    }
+
+    if (!FolderPath.StartsWith(TEXT("/Game")))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("folder_path must be under /Game"));
+    }
+
+    const bool bExists = UEditorAssetLibrary::DoesDirectoryExist(FolderPath);
+    const bool bCreated = bExists || UEditorAssetLibrary::MakeDirectory(FolderPath);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("folder_path"), FolderPath);
+    ResultObj->SetBoolField(TEXT("already_exists"), bExists);
+    ResultObj->SetBoolField(TEXT("created"), bCreated);
+    return bCreated ? ResultObj : FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to create folder: %s"), *FolderPath));
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleDuplicateAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString SourceAssetPath;
+    if (!Params->TryGetStringField(TEXT("source_asset_path"), SourceAssetPath) &&
+        !Params->TryGetStringField(TEXT("source"), SourceAssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'source_asset_path' parameter"));
+    }
+
+    FString DestinationAssetPath;
+    if (!Params->TryGetStringField(TEXT("destination_asset_path"), DestinationAssetPath) &&
+        !Params->TryGetStringField(TEXT("destination"), DestinationAssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'destination_asset_path' parameter"));
+    }
+
+    if (!UEditorAssetLibrary::DoesAssetExist(SourceAssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Source asset not found: %s"), *SourceAssetPath));
+    }
+
+    UObject* NewAsset = UEditorAssetLibrary::DuplicateAsset(SourceAssetPath, DestinationAssetPath);
+    if (!NewAsset)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to duplicate asset"));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = FUnrealMCPCommonUtils::ObjectToJsonObject(NewAsset, false);
+    ResultObj->SetStringField(TEXT("source_asset_path"), SourceAssetPath);
+    ResultObj->SetStringField(TEXT("destination_asset_path"), DestinationAssetPath);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleRenameAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString SourceAssetPath;
+    if (!Params->TryGetStringField(TEXT("source_asset_path"), SourceAssetPath) &&
+        !Params->TryGetStringField(TEXT("source"), SourceAssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'source_asset_path' parameter"));
+    }
+
+    FString DestinationAssetPath;
+    if (!Params->TryGetStringField(TEXT("destination_asset_path"), DestinationAssetPath) &&
+        !Params->TryGetStringField(TEXT("destination"), DestinationAssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'destination_asset_path' parameter"));
+    }
+
+    const bool bRenamed = UEditorAssetLibrary::RenameAsset(SourceAssetPath, DestinationAssetPath);
+    if (!bRenamed)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to rename asset"));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("source_asset_path"), SourceAssetPath);
+    ResultObj->SetStringField(TEXT("destination_asset_path"), DestinationAssetPath);
+    ResultObj->SetBoolField(TEXT("renamed"), true);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleDeleteAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    const bool bDeleted = UEditorAssetLibrary::DeleteAsset(AssetPath);
+    if (!bDeleted)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to delete asset: %s"), *AssetPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetBoolField(TEXT("deleted"), true);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSaveAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    bool bOnlyIfDirty = true;
+    Params->TryGetBoolField(TEXT("only_if_dirty"), bOnlyIfDirty);
+
+    const bool bSaved = UEditorAssetLibrary::SaveAsset(AssetPath, bOnlyIfDirty);
+    if (!bSaved)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to save asset: %s"), *AssetPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("asset_path"), AssetPath);
+    ResultObj->SetBoolField(TEXT("saved"), true);
+    ResultObj->SetBoolField(TEXT("only_if_dirty"), bOnlyIfDirty);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFixupRedirectors(const TSharedPtr<FJsonObject>& Params)
+{
+    FString FolderPath = TEXT("/Game");
+    Params->TryGetStringField(TEXT("folder_path"), FolderPath);
+    Params->TryGetStringField(TEXT("path"), FolderPath);
+
+    if (!FolderPath.StartsWith(TEXT("/Game")))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("folder_path must be under /Game"));
+    }
+
+    bool bRecursive = true;
+    Params->TryGetBoolField(TEXT("recursive"), bRecursive);
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    FARFilter Filter;
+    Filter.PackagePaths.Add(*FolderPath);
+    Filter.ClassPaths.Add(UObjectRedirector::StaticClass()->GetClassPathName());
+    Filter.bRecursivePaths = bRecursive;
+
+    TArray<FAssetData> RedirectorAssets;
+    AssetRegistryModule.Get().GetAssets(Filter, RedirectorAssets);
+
+    TArray<UObjectRedirector*> Redirectors;
+    TArray<TSharedPtr<FJsonValue>> RedirectorArray;
+    for (const FAssetData& AssetData : RedirectorAssets)
+    {
+        UObjectRedirector* Redirector = Cast<UObjectRedirector>(AssetData.GetAsset());
+        if (!Redirector)
+        {
+            continue;
+        }
+
+        Redirectors.Add(Redirector);
+        TSharedPtr<FJsonObject> RedirectorObj = MakeShared<FJsonObject>();
+        RedirectorObj->SetStringField(TEXT("asset_name"), AssetData.AssetName.ToString());
+        RedirectorObj->SetStringField(TEXT("package_name"), AssetData.PackageName.ToString());
+        RedirectorObj->SetStringField(TEXT("object_path"), AssetData.GetObjectPathString());
+        RedirectorArray.Add(MakeShared<FJsonValueObject>(RedirectorObj));
+    }
+
+    if (Redirectors.Num() > 0)
+    {
+        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+        AssetToolsModule.Get().FixupReferencers(Redirectors, false);
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("folder_path"), FolderPath);
+    ResultObj->SetBoolField(TEXT("recursive"), bRecursive);
+    ResultObj->SetNumberField(TEXT("redirector_count"), Redirectors.Num());
+    ResultObj->SetArrayField(TEXT("redirectors"), RedirectorArray);
+    ResultObj->SetBoolField(TEXT("fixed_up"), true);
+    return ResultObj;
+}
+
+struct FUnrealMCPImportSpec
+{
+    FString SourceFile;
+    FString DestinationPath = TEXT("/Game");
+    FString DestinationName;
+    bool bReplaceExisting = true;
+    bool bSave = true;
+};
+
+static bool ReadImportSpecFromParams(const TSharedPtr<FJsonObject>& Params, FUnrealMCPImportSpec& OutSpec, FString& OutError)
+{
+    if (!Params->TryGetStringField(TEXT("source_file"), OutSpec.SourceFile) &&
+        !Params->TryGetStringField(TEXT("filename"), OutSpec.SourceFile) &&
+        !Params->TryGetStringField(TEXT("file_path"), OutSpec.SourceFile))
+    {
+        OutError = TEXT("Missing 'source_file' parameter");
+        return false;
+    }
+
+    if (!FPaths::FileExists(OutSpec.SourceFile))
+    {
+        OutError = FString::Printf(TEXT("Source file not found: %s"), *OutSpec.SourceFile);
+        return false;
+    }
+
+    Params->TryGetStringField(TEXT("destination_path"), OutSpec.DestinationPath);
+    Params->TryGetStringField(TEXT("folder_path"), OutSpec.DestinationPath);
+    if (!OutSpec.DestinationPath.StartsWith(TEXT("/Game")))
+    {
+        OutError = TEXT("destination_path must be under /Game");
+        return false;
+    }
+
+    Params->TryGetStringField(TEXT("destination_name"), OutSpec.DestinationName);
+    Params->TryGetStringField(TEXT("asset_name"), OutSpec.DestinationName);
+    Params->TryGetBoolField(TEXT("replace_existing"), OutSpec.bReplaceExisting);
+    Params->TryGetBoolField(TEXT("save"), OutSpec.bSave);
+    return true;
+}
+
+static UFactory* CreateLegacyImportFactory(const FString& SourceFile, const TSharedPtr<FJsonObject>& Params)
+{
+    FString FactoryName;
+    Params->TryGetStringField(TEXT("factory_name"), FactoryName);
+    Params->TryGetStringField(TEXT("factory"), FactoryName);
+    const FString Extension = FPaths::GetExtension(SourceFile).ToLower();
+
+    if (FactoryName.Equals(TEXT("none"), ESearchCase::IgnoreCase) ||
+        FactoryName.Equals(TEXT("auto"), ESearchCase::IgnoreCase))
+    {
+        return nullptr;
+    }
+
+    if (FactoryName.Equals(TEXT("TextureFactory"), ESearchCase::IgnoreCase) ||
+        FactoryName.Equals(TEXT("Texture"), ESearchCase::IgnoreCase) ||
+        (FactoryName.IsEmpty() && (Extension == TEXT("png") || Extension == TEXT("jpg") || Extension == TEXT("jpeg") || Extension == TEXT("tga") || Extension == TEXT("bmp") || Extension == TEXT("exr") || Extension == TEXT("hdr"))))
+    {
+        UTextureFactory* TextureFactory = NewObject<UTextureFactory>();
+        TextureFactory->AddToRoot();
+        return TextureFactory;
+    }
+
+    if (FactoryName.Equals(TEXT("FbxFactory"), ESearchCase::IgnoreCase) ||
+        FactoryName.Equals(TEXT("FBX"), ESearchCase::IgnoreCase) ||
+        (FactoryName.IsEmpty() && Extension == TEXT("fbx")))
+    {
+        UFbxFactory* FbxFactory = NewObject<UFbxFactory>();
+        FbxFactory->AddToRoot();
+        return FbxFactory;
+    }
+
+    return nullptr;
+}
+
+static TArray<UObject*> ImportWithAssetTask(
+    const FUnrealMCPImportSpec& ImportSpec,
+    UFactory* Factory)
+{
+    UAssetImportTask* ImportTask = NewObject<UAssetImportTask>();
+    ImportTask->Filename = ImportSpec.SourceFile;
+    ImportTask->DestinationPath = ImportSpec.DestinationPath;
+    ImportTask->DestinationName = ImportSpec.DestinationName;
+    ImportTask->bReplaceExisting = ImportSpec.bReplaceExisting;
+    ImportTask->bReplaceExistingSettings = ImportSpec.bReplaceExisting;
+    ImportTask->bAutomated = true;
+    ImportTask->bSave = false;
+    ImportTask->bAsync = false;
+    ImportTask->Factory = Factory;
+
+    TArray<UAssetImportTask*> Tasks;
+    Tasks.Add(ImportTask);
+
+    FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools"));
+    AssetToolsModule.Get().ImportAssetTasks(Tasks);
+
+    TArray<UObject*> ImportedObjects;
+    for (UObject* ImportedObject : ImportTask->GetObjects())
+    {
+        if (ImportedObject)
+        {
+            ImportedObjects.Add(ImportedObject);
+        }
+    }
+    return ImportedObjects;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleImportAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString Error;
+    FUnrealMCPImportSpec ImportSpec;
+    if (!ReadImportSpecFromParams(Params, ImportSpec, Error))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(Error);
+    }
+
+    UFactory* Factory = CreateLegacyImportFactory(ImportSpec.SourceFile, Params);
+    TArray<UObject*> ImportedObjects = ImportWithAssetTask(ImportSpec, Factory);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("source_file"), ImportSpec.SourceFile);
+    ResultObj->SetStringField(TEXT("destination_path"), ImportSpec.DestinationPath);
+    ResultObj->SetStringField(TEXT("destination_name"), ImportSpec.DestinationName);
+    ResultObj->SetBoolField(TEXT("replace_existing"), ImportSpec.bReplaceExisting);
+    ResultObj->SetBoolField(TEXT("saved"), false);
+
+    TArray<TSharedPtr<FJsonValue>> ImportedObjectsJson;
+    TArray<TSharedPtr<FJsonValue>> ImportedPaths;
+    TArray<UPackage*> PackagesToSave;
+    for (UObject* ImportedObject : ImportedObjects)
+    {
+        if (!ImportedObject)
+        {
+            continue;
+        }
+        ImportedObjectsJson.Add(MakeShared<FJsonValueObject>(FUnrealMCPCommonUtils::ObjectToJsonObject(ImportedObject, false)));
+        ImportedPaths.Add(MakeShared<FJsonValueString>(ImportedObject->GetPathName()));
+        PackagesToSave.AddUnique(ImportedObject->GetOutermost());
+    }
+
+    if (ImportSpec.bSave && PackagesToSave.Num() > 0)
+    {
+        UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
+        ResultObj->SetBoolField(TEXT("saved"), true);
+    }
+
+    ResultObj->SetArrayField(TEXT("imported_object_paths"), ImportedPaths);
+    ResultObj->SetArrayField(TEXT("imported_objects"), ImportedObjectsJson);
+    ResultObj->SetNumberField(TEXT("imported_count"), ImportedObjectsJson.Num());
+
+    if (ImportedObjectsJson.Num() <= 0)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Import failed: %s"), *ImportSpec.SourceFile));
+    }
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleImportAssetsBatch(const TSharedPtr<FJsonObject>& Params)
+{
+    const TArray<TSharedPtr<FJsonValue>>* AssetSpecs = nullptr;
+    if (!Params->TryGetArrayField(TEXT("assets"), AssetSpecs) || !AssetSpecs)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'assets' array parameter"));
+    }
+
+    TArray<TPair<FUnrealMCPImportSpec, TSharedPtr<FJsonObject>>> Tasks;
+    TArray<TSharedPtr<FJsonValue>> ValidationErrors;
+    for (const TSharedPtr<FJsonValue>& AssetSpecValue : *AssetSpecs)
+    {
+        const TSharedPtr<FJsonObject>* AssetSpecPtr = nullptr;
+        if (!AssetSpecValue->TryGetObject(AssetSpecPtr) || !AssetSpecPtr || !AssetSpecPtr->IsValid())
+        {
+            ValidationErrors.Add(MakeShared<FJsonValueString>(TEXT("Asset spec must be an object")));
+            continue;
+        }
+
+        FString Error;
+        FUnrealMCPImportSpec ImportSpec;
+        if (!ReadImportSpecFromParams(*AssetSpecPtr, ImportSpec, Error))
+        {
+            ValidationErrors.Add(MakeShared<FJsonValueString>(Error));
+            continue;
+        }
+        Tasks.Add(TPair<FUnrealMCPImportSpec, TSharedPtr<FJsonObject>>(ImportSpec, *AssetSpecPtr));
+    }
+
+    if (Tasks.Num() == 0)
+    {
+        TSharedPtr<FJsonObject> ErrorObj = FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No valid import tasks"));
+        ErrorObj->SetArrayField(TEXT("validation_errors"), ValidationErrors);
+        return ErrorObj;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> ResultArray;
+    int32 ImportedTotal = 0;
+    for (const TPair<FUnrealMCPImportSpec, TSharedPtr<FJsonObject>>& TaskPair : Tasks)
+    {
+        const FUnrealMCPImportSpec& ImportSpec = TaskPair.Key;
+        UFactory* Factory = CreateLegacyImportFactory(ImportSpec.SourceFile, TaskPair.Value);
+        TArray<UObject*> ImportedObjects = ImportWithAssetTask(ImportSpec, Factory);
+
+        TSharedPtr<FJsonObject> TaskObj = MakeShared<FJsonObject>();
+        TaskObj->SetStringField(TEXT("source_file"), ImportSpec.SourceFile);
+        TaskObj->SetStringField(TEXT("destination_path"), ImportSpec.DestinationPath);
+        TaskObj->SetStringField(TEXT("destination_name"), ImportSpec.DestinationName);
+        TaskObj->SetBoolField(TEXT("replace_existing"), ImportSpec.bReplaceExisting);
+        TaskObj->SetBoolField(TEXT("saved"), false);
+
+        TArray<TSharedPtr<FJsonValue>> ImportedObjectsJson;
+        TArray<TSharedPtr<FJsonValue>> ImportedPaths;
+        TArray<UPackage*> PackagesToSave;
+        for (UObject* ImportedObject : ImportedObjects)
+        {
+            if (!ImportedObject)
+            {
+                continue;
+            }
+            ImportedObjectsJson.Add(MakeShared<FJsonValueObject>(FUnrealMCPCommonUtils::ObjectToJsonObject(ImportedObject, false)));
+            ImportedPaths.Add(MakeShared<FJsonValueString>(ImportedObject->GetPathName()));
+            PackagesToSave.AddUnique(ImportedObject->GetOutermost());
+        }
+        if (ImportSpec.bSave && PackagesToSave.Num() > 0)
+        {
+            UEditorLoadingAndSavingUtils::SavePackages(PackagesToSave, true);
+            TaskObj->SetBoolField(TEXT("saved"), true);
+        }
+        TaskObj->SetArrayField(TEXT("imported_object_paths"), ImportedPaths);
+        TaskObj->SetArrayField(TEXT("imported_objects"), ImportedObjectsJson);
+        TaskObj->SetNumberField(TEXT("imported_count"), ImportedObjectsJson.Num());
+        ImportedTotal += ImportedObjectsJson.Num();
+        ResultArray.Add(MakeShared<FJsonValueObject>(TaskObj));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetNumberField(TEXT("task_count"), Tasks.Num());
+    ResultObj->SetNumberField(TEXT("imported_total"), ImportedTotal);
+    ResultObj->SetArrayField(TEXT("results"), ResultArray);
+    ResultObj->SetArrayField(TEXT("validation_errors"), ValidationErrors);
     return ResultObj;
 }
 
@@ -899,6 +1392,83 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorMeshAsset(const 
     }
 
     return FUnrealMCPCommonUtils::ActorToJsonObject(TargetActor, true);
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorComponentProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorName;
+    if (!Params->TryGetStringField(TEXT("actor_name"), ActorName))
+    {
+        Params->TryGetStringField(TEXT("name"), ActorName);
+    }
+    if (ActorName.IsEmpty())
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'actor_name' parameter"));
+    }
+
+    FString ComponentName;
+    if (!Params->TryGetStringField(TEXT("component_name"), ComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'component_name' parameter"));
+    }
+
+    FString PropertyName;
+    if (!Params->TryGetStringField(TEXT("property_name"), PropertyName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'property_name' parameter"));
+    }
+
+    if (!Params->HasField(TEXT("property_value")))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'property_value' parameter"));
+    }
+
+    AActor* TargetActor = nullptr;
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && Actor->GetName() == ActorName)
+        {
+            TargetActor = Actor;
+            break;
+        }
+    }
+
+    if (!TargetActor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+    }
+
+    UActorComponent* TargetComponent = nullptr;
+    TArray<UActorComponent*> Components;
+    TargetActor->GetComponents(Components);
+    for (UActorComponent* Component : Components)
+    {
+        if (Component && Component->GetName() == ComponentName)
+        {
+            TargetComponent = Component;
+            break;
+        }
+    }
+
+    if (!TargetComponent)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+    }
+
+    FString ErrorMessage;
+    if (!FUnrealMCPCommonUtils::SetObjectProperty(TargetComponent, PropertyName, Params->Values.FindRef(TEXT("property_value")), ErrorMessage))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(ErrorMessage);
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("actor_name"), ActorName);
+    ResultObj->SetStringField(TEXT("component_name"), ComponentName);
+    ResultObj->SetStringField(TEXT("property_name"), PropertyName);
+    ResultObj->SetObjectField(TEXT("component"), FUnrealMCPCommonUtils::ObjectToJsonObject(TargetComponent, true, 100));
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorComponentMaterial(const TSharedPtr<FJsonObject>& Params)

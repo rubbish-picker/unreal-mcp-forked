@@ -107,8 +107,17 @@ TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
     Commands.Add(MakeCommand(TEXT("inspect_component_collision"), TEXT("editor"), TEXT("Inspect primitive component collision settings on an actor.")));
     Commands.Add(MakeCommand(TEXT("find_asset_references"), TEXT("editor"), TEXT("Find asset referencers and dependencies.")));
     Commands.Add(MakeCommand(TEXT("list_assets_by_class"), TEXT("editor"), TEXT("List assets by class, path, and optional name substring.")));
+    Commands.Add(MakeCommand(TEXT("create_content_folder"), TEXT("editor"), TEXT("Create a Content Browser folder under /Game.")));
+    Commands.Add(MakeCommand(TEXT("duplicate_asset"), TEXT("editor"), TEXT("Duplicate an asset to a destination path.")));
+    Commands.Add(MakeCommand(TEXT("rename_asset"), TEXT("editor"), TEXT("Rename or move an asset.")));
+    Commands.Add(MakeCommand(TEXT("delete_asset"), TEXT("editor"), TEXT("Delete an asset.")));
+    Commands.Add(MakeCommand(TEXT("save_asset"), TEXT("editor"), TEXT("Save one loaded asset.")));
+    Commands.Add(MakeCommand(TEXT("fixup_redirectors"), TEXT("editor"), TEXT("Fix redirectors under a Content Browser folder.")));
+    Commands.Add(MakeCommand(TEXT("import_asset"), TEXT("editor"), TEXT("Import one local file into the Content Browser.")));
+    Commands.Add(MakeCommand(TEXT("import_assets_batch"), TEXT("editor"), TEXT("Import multiple local files into the Content Browser.")));
     Commands.Add(MakeCommand(TEXT("spawn_mesh_actor_from_asset"), TEXT("editor"), TEXT("Spawn a StaticMeshActor or SkeletalMeshActor from a mesh asset.")));
     Commands.Add(MakeCommand(TEXT("set_actor_mesh_asset"), TEXT("editor"), TEXT("Set a static or skeletal mesh asset on an actor component.")));
+    Commands.Add(MakeCommand(TEXT("set_actor_component_property"), TEXT("editor"), TEXT("Set a property on an actor component instance.")));
     Commands.Add(MakeCommand(TEXT("set_actor_component_material"), TEXT("editor"), TEXT("Set a material slot on an actor mesh component.")));
     Commands.Add(MakeCommand(TEXT("set_material_parameter"), TEXT("editor"), TEXT("Set scalar or vector parameters on a Material or MaterialInstanceConstant.")));
     Commands.Add(MakeCommand(TEXT("spawn_blueprint_actor"), TEXT("editor"), TEXT("Spawn an actor from a Blueprint.")));
@@ -146,6 +155,7 @@ TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
     Commands.Add(MakeCommand(TEXT("remove_blueprint_actor_overlap_nodes"), TEXT("blueprint_node"), TEXT("Remove legacy actor overlap door chains.")));
 
     Commands.Add(MakeCommand(TEXT("create_input_mapping"), TEXT("project"), TEXT("Create an action or axis input mapping.")));
+    Commands.Add(MakeCommand(TEXT("remove_input_mapping"), TEXT("project"), TEXT("Remove action or axis input mappings by name and optional key.")));
     Commands.Add(MakeCommand(TEXT("inspect_input_mappings"), TEXT("project"), TEXT("List action and axis input mappings.")));
 
     Commands.Add(MakeCommand(TEXT("create_umg_widget_blueprint"), TEXT("umg"), TEXT("Create a Widget Blueprint.")));
@@ -323,8 +333,17 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("inspect_component_collision") ||
                      CommandType == TEXT("find_asset_references") ||
                      CommandType == TEXT("list_assets_by_class") ||
+                     CommandType == TEXT("create_content_folder") ||
+                     CommandType == TEXT("duplicate_asset") ||
+                     CommandType == TEXT("rename_asset") ||
+                     CommandType == TEXT("delete_asset") ||
+                     CommandType == TEXT("save_asset") ||
+                     CommandType == TEXT("fixup_redirectors") ||
+                     CommandType == TEXT("import_asset") ||
+                     CommandType == TEXT("import_assets_batch") ||
                      CommandType == TEXT("spawn_mesh_actor_from_asset") ||
                      CommandType == TEXT("set_actor_mesh_asset") ||
+                     CommandType == TEXT("set_actor_component_property") ||
                      CommandType == TEXT("set_actor_component_material") ||
                      CommandType == TEXT("set_material_parameter") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
@@ -372,6 +391,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
             }
             // Project Commands
             else if (CommandType == TEXT("create_input_mapping") ||
+                     CommandType == TEXT("remove_input_mapping") ||
                      CommandType == TEXT("inspect_input_mappings"))
             {
                 ResultJson = ProjectCommands->HandleCommand(CommandType, Params);

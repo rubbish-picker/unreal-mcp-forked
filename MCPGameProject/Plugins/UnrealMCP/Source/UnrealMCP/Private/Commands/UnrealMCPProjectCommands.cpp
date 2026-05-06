@@ -12,6 +12,10 @@ TSharedPtr<FJsonObject> FUnrealMCPProjectCommands::HandleCommand(const FString& 
     {
         return HandleCreateInputMapping(Params);
     }
+    else if (CommandType == TEXT("remove_input_mapping"))
+    {
+        return HandleRemoveInputMapping(Params);
+    }
     else if (CommandType == TEXT("inspect_input_mappings"))
     {
         return HandleInspectInputMappings(Params);
@@ -104,6 +108,62 @@ TSharedPtr<FJsonObject> FUnrealMCPProjectCommands::HandleCreateInputMapping(cons
     ResultObj->SetStringField(TEXT("key"), Key);
     return ResultObj;
 } 
+
+TSharedPtr<FJsonObject> FUnrealMCPProjectCommands::HandleRemoveInputMapping(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActionName;
+    if (!Params->TryGetStringField(TEXT("action_name"), ActionName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'action_name' parameter"));
+    }
+
+    FString Key;
+    Params->TryGetStringField(TEXT("key"), Key);
+
+    FString InputType = TEXT("Action");
+    Params->TryGetStringField(TEXT("input_type"), InputType);
+
+    UInputSettings* InputSettings = GetMutableDefault<UInputSettings>();
+    if (!InputSettings)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get input settings"));
+    }
+
+    int32 RemovedCount = 0;
+    if (InputType.Equals(TEXT("Axis"), ESearchCase::IgnoreCase))
+    {
+        TArray<FInputAxisKeyMapping> Mappings = InputSettings->GetAxisMappings();
+        for (const FInputAxisKeyMapping& Mapping : Mappings)
+        {
+            if (Mapping.AxisName == FName(*ActionName) && (Key.IsEmpty() || Mapping.Key == FKey(*Key)))
+            {
+                InputSettings->RemoveAxisMapping(Mapping);
+                ++RemovedCount;
+            }
+        }
+    }
+    else
+    {
+        TArray<FInputActionKeyMapping> Mappings = InputSettings->GetActionMappings();
+        for (const FInputActionKeyMapping& Mapping : Mappings)
+        {
+            if (Mapping.ActionName == FName(*ActionName) && (Key.IsEmpty() || Mapping.Key == FKey(*Key)))
+            {
+                InputSettings->RemoveActionMapping(Mapping);
+                ++RemovedCount;
+            }
+        }
+    }
+
+    InputSettings->SaveConfig();
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("action_name"), ActionName);
+    ResultObj->SetStringField(TEXT("key"), Key);
+    ResultObj->SetStringField(TEXT("input_type"), InputType);
+    ResultObj->SetNumberField(TEXT("removed_count"), RemovedCount);
+    return ResultObj;
+}
 
 TSharedPtr<FJsonObject> FUnrealMCPProjectCommands::HandleInspectInputMappings(const TSharedPtr<FJsonObject>& Params)
 {

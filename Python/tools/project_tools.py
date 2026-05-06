@@ -80,5 +80,32 @@ def register_project_tools(mcp: FastMCP):
             error_msg = f"Error inspecting input mappings: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def remove_input_mapping(
+        ctx: Context,
+        action_name: str,
+        key: str = "",
+        input_type: str = "Action"
+    ) -> Dict[str, Any]:
+        """Remove action or axis input mappings by name and optional key."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("remove_input_mapping", {
+                "action_name": action_name,
+                "key": key,
+                "input_type": input_type
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error removing input mapping: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
     
     logger.info("Project tools registered successfully") 

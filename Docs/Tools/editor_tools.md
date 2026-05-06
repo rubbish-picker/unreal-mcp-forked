@@ -59,6 +59,70 @@ List assets by Unreal class, path, and optional name substring. Useful before ch
 - `name_contains` (string, optional) - Optional asset-name substring filter
 - `max_results` (integer, optional) - Maximum number of assets to return
 
+### create_content_folder
+
+Create a Content Browser folder under `/Game`.
+
+**Parameters:**
+- `folder_path` (string) - Folder path, for example `/Game/MCP_Test`
+
+### duplicate_asset
+
+Duplicate an asset to a destination path.
+
+**Parameters:**
+- `source_asset_path` (string) - Source asset path
+- `destination_asset_path` (string) - Destination asset path
+
+### rename_asset
+
+Rename or move an asset.
+
+**Parameters:**
+- `source_asset_path` (string) - Source asset path
+- `destination_asset_path` (string) - Destination asset path
+
+### delete_asset
+
+Delete an asset.
+
+**Parameters:**
+- `asset_path` (string) - Asset path to delete
+
+### save_asset
+
+Save one loaded asset.
+
+**Parameters:**
+- `asset_path` (string) - Asset path to save
+- `only_if_dirty` (boolean, optional) - Save only when dirty
+
+### fixup_redirectors
+
+Fix redirectors under a Content Browser folder.
+
+**Parameters:**
+- `folder_path` (string, optional) - Folder path, default `/Game`
+- `recursive` (boolean, optional) - Include child folders
+
+### import_asset
+
+Import one local file into the Content Browser.
+
+**Parameters:**
+- `source_file` (string) - Absolute local file path to import
+- `destination_path` (string, optional) - Content Browser folder, default `/Game`
+- `destination_name` (string, optional) - Asset name override
+- `replace_existing` (boolean, optional) - Replace an existing asset
+- `save` (boolean, optional) - Save after import
+
+### import_assets_batch
+
+Import multiple local files into the Content Browser.
+
+**Parameters:**
+- `assets` (array) - Import specs using the same fields as `import_asset`
+
 ### spawn_mesh_actor_from_asset
 
 Spawn a `StaticMeshActor` or `SkeletalMeshActor` from a mesh asset.
@@ -76,6 +140,16 @@ Set a StaticMesh or SkeletalMesh asset on an actor mesh component.
 - `actor_name` (string) - Actor name
 - `asset_path` (string) - StaticMesh or SkeletalMesh asset path
 - `component_name` (string, optional) - Mesh component name
+
+### set_actor_component_property
+
+Set a property on an actor component instance in the current level.
+
+**Parameters:**
+- `actor_name` (string) - Actor name
+- `component_name` (string) - Component name on that actor
+- `property_name` (string) - Property to set
+- `property_value` (any) - New property value
 
 ### set_actor_component_material
 
