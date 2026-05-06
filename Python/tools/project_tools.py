@@ -19,7 +19,8 @@ def register_project_tools(mcp: FastMCP):
         ctx: Context,
         action_name: str,
         key: str,
-        input_type: str = "Action"
+        input_type: str = "Action",
+        scale: float = 1.0
     ) -> Dict[str, Any]:
         """
         Create an input mapping for the project.
@@ -43,7 +44,8 @@ def register_project_tools(mcp: FastMCP):
             params = {
                 "action_name": action_name,
                 "key": key,
-                "input_type": input_type
+                "input_type": input_type,
+                "scale": scale
             }
             
             logger.info(f"Creating input mapping '{action_name}' with key '{key}'")
@@ -58,6 +60,24 @@ def register_project_tools(mcp: FastMCP):
             
         except Exception as e:
             error_msg = f"Error creating input mapping: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def inspect_input_mappings(ctx: Context) -> Dict[str, Any]:
+        """List project action and axis input mappings."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("inspect_input_mappings", {})
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error inspecting input mappings: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
     

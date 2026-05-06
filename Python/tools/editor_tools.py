@@ -539,4 +539,149 @@ def register_editor_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
+    @mcp.tool()
+    def list_assets_by_class(
+        ctx: Context,
+        class_name: str,
+        path: str = "/Game",
+        name_contains: str = "",
+        max_results: int = 200
+    ) -> Dict[str, Any]:
+        """List assets by Unreal class name, such as StaticMesh, SkeletalMesh, or MaterialInstanceConstant."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("list_assets_by_class", {
+                "class_name": class_name,
+                "path": path,
+                "name_contains": name_contains,
+                "max_results": max_results
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error listing assets: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def spawn_mesh_actor_from_asset(
+        ctx: Context,
+        asset_path: str,
+        actor_name: str = "",
+        location: List[float] = [0.0, 0.0, 0.0],
+        rotation: List[float] = [0.0, 0.0, 0.0],
+        scale: List[float] = [1.0, 1.0, 1.0]
+    ) -> Dict[str, Any]:
+        """Spawn a StaticMeshActor or SkeletalMeshActor from a mesh asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("spawn_mesh_actor_from_asset", {
+                "asset_path": asset_path,
+                "actor_name": actor_name,
+                "location": location,
+                "rotation": rotation,
+                "scale": scale
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error spawning mesh actor from asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_actor_mesh_asset(
+        ctx: Context,
+        actor_name: str,
+        asset_path: str,
+        component_name: str = ""
+    ) -> Dict[str, Any]:
+        """Set a StaticMesh or SkeletalMesh asset on an actor mesh component."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("set_actor_mesh_asset", {
+                "actor_name": actor_name,
+                "asset_path": asset_path,
+                "component_name": component_name
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error setting actor mesh asset: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_actor_component_material(
+        ctx: Context,
+        actor_name: str,
+        material_path: str,
+        component_name: str = "",
+        material_index: int = 0
+    ) -> Dict[str, Any]:
+        """Set a material slot on an actor mesh component."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("set_actor_component_material", {
+                "actor_name": actor_name,
+                "component_name": component_name,
+                "material_path": material_path,
+                "material_index": material_index
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error setting actor component material: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_material_parameter(
+        ctx: Context,
+        material_path: str,
+        parameter_name: str,
+        value,
+        parameter_type: str = "scalar"
+    ) -> Dict[str, Any]:
+        """Set a scalar or vector parameter on a Material or MaterialInstanceConstant asset."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("set_material_parameter", {
+                "material_path": material_path,
+                "parameter_name": parameter_name,
+                "parameter_type": parameter_type,
+                "value": value
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error setting material parameter: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
     logger.info("Editor tools registered successfully")

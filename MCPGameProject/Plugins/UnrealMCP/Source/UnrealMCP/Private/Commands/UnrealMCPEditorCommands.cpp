@@ -14,11 +14,14 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Engine/StaticMeshActor.h"
+#include "Animation/SkeletalMeshActor.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/PointLight.h"
 #include "Engine/SpotLight.h"
 #include "Camera/CameraActor.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/MeshComponent.h"
 #include "EditorSubsystem.h"
 #include "Subsystems/EditorActorSubsystem.h"
 #include "Engine/Blueprint.h"
@@ -27,6 +30,12 @@
 #include "Engine/SCS_Node.h"
 #include "Components/PrimitiveComponent.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "EditorAssetLibrary.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "Materials/MaterialInterface.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -82,6 +91,26 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("find_asset_references"))
     {
         return HandleFindAssetReferences(Params);
+    }
+    else if (CommandType == TEXT("list_assets_by_class"))
+    {
+        return HandleListAssetsByClass(Params);
+    }
+    else if (CommandType == TEXT("spawn_mesh_actor_from_asset"))
+    {
+        return HandleSpawnMeshActorFromAsset(Params);
+    }
+    else if (CommandType == TEXT("set_actor_mesh_asset"))
+    {
+        return HandleSetActorMeshAsset(Params);
+    }
+    else if (CommandType == TEXT("set_actor_component_material"))
+    {
+        return HandleSetActorComponentMaterial(Params);
+    }
+    else if (CommandType == TEXT("set_material_parameter"))
+    {
+        return HandleSetMaterialParameter(Params);
     }
     // Blueprint actor spawning
     else if (CommandType == TEXT("spawn_blueprint_actor"))
@@ -656,6 +685,371 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFindAssetReferences(cons
     ResultObj->SetArrayField(TEXT("dependencies"), DependencyArray);
     ResultObj->SetNumberField(TEXT("referencer_count"), ReferencerArray.Num());
     ResultObj->SetNumberField(TEXT("dependency_count"), DependencyArray.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleListAssetsByClass(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ClassName;
+    if (!Params->TryGetStringField(TEXT("class_name"), ClassName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'class_name' parameter"));
+    }
+
+    FString PackagePath = TEXT("/Game");
+    Params->TryGetStringField(TEXT("path"), PackagePath);
+
+    FString NameContains;
+    Params->TryGetStringField(TEXT("name_contains"), NameContains);
+
+    int32 MaxResults = 200;
+    Params->TryGetNumberField(TEXT("max_results"), MaxResults);
+
+    UClass* AssetClass = FUnrealMCPCommonUtils::FindClassByName(ClassName);
+    if (!AssetClass)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset class not found: %s"), *ClassName));
+    }
+
+    FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+    FARFilter Filter;
+    Filter.PackagePaths.Add(FName(*PackagePath));
+    Filter.ClassPaths.Add(AssetClass->GetClassPathName());
+    Filter.bRecursivePaths = true;
+    Filter.bRecursiveClasses = true;
+
+    TArray<FAssetData> Assets;
+    AssetRegistry.GetAssets(Filter, Assets);
+
+    TArray<TSharedPtr<FJsonValue>> AssetArray;
+    for (const FAssetData& Asset : Assets)
+    {
+        if (!NameContains.IsEmpty() && !Asset.AssetName.ToString().Contains(NameContains))
+        {
+            continue;
+        }
+
+        TSharedPtr<FJsonObject> AssetObj = MakeShared<FJsonObject>();
+        AssetObj->SetStringField(TEXT("name"), Asset.AssetName.ToString());
+        AssetObj->SetStringField(TEXT("class"), Asset.AssetClassPath.ToString());
+        AssetObj->SetStringField(TEXT("package_name"), Asset.PackageName.ToString());
+        AssetObj->SetStringField(TEXT("object_path"), Asset.GetObjectPathString());
+        AssetArray.Add(MakeShared<FJsonValueObject>(AssetObj));
+
+        if (MaxResults > 0 && AssetArray.Num() >= MaxResults)
+        {
+            break;
+        }
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("class_name"), ClassName);
+    ResultObj->SetStringField(TEXT("path"), PackagePath);
+    ResultObj->SetArrayField(TEXT("assets"), AssetArray);
+    ResultObj->SetNumberField(TEXT("count"), AssetArray.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnMeshActorFromAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    FString ActorName;
+    if (!Params->TryGetStringField(TEXT("actor_name"), ActorName))
+    {
+        Params->TryGetStringField(TEXT("name"), ActorName);
+    }
+    if (ActorName.IsEmpty())
+    {
+        ActorName = FPackageName::GetShortName(AssetPath);
+    }
+
+    FVector Location(0.0f, 0.0f, 0.0f);
+    FRotator Rotation(0.0f, 0.0f, 0.0f);
+    FVector Scale(1.0f, 1.0f, 1.0f);
+    if (Params->HasField(TEXT("location")))
+    {
+        Location = FUnrealMCPCommonUtils::GetVectorFromJson(Params, TEXT("location"));
+    }
+    if (Params->HasField(TEXT("rotation")))
+    {
+        Rotation = FUnrealMCPCommonUtils::GetRotatorFromJson(Params, TEXT("rotation"));
+    }
+    if (Params->HasField(TEXT("scale")))
+    {
+        Scale = FUnrealMCPCommonUtils::GetVectorFromJson(Params, TEXT("scale"));
+    }
+
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!World)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
+    }
+
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+    AActor* NewActor = nullptr;
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Name = *ActorName;
+
+    if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Asset))
+    {
+        AStaticMeshActor* StaticActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Location, Rotation, SpawnParams);
+        if (StaticActor && StaticActor->GetStaticMeshComponent())
+        {
+            StaticActor->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
+            NewActor = StaticActor;
+        }
+    }
+    else if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(Asset))
+    {
+        ASkeletalMeshActor* SkeletalActor = World->SpawnActor<ASkeletalMeshActor>(ASkeletalMeshActor::StaticClass(), Location, Rotation, SpawnParams);
+        if (SkeletalActor && SkeletalActor->GetSkeletalMeshComponent())
+        {
+            SkeletalActor->GetSkeletalMeshComponent()->SetSkeletalMesh(SkeletalMesh);
+            NewActor = SkeletalActor;
+        }
+    }
+    else
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset is not a StaticMesh or SkeletalMesh: %s"), *AssetPath));
+    }
+
+    if (!NewActor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to spawn mesh actor"));
+    }
+
+    NewActor->SetActorScale3D(Scale);
+    return FUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true);
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorMeshAsset(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorName;
+    if (!Params->TryGetStringField(TEXT("actor_name"), ActorName))
+    {
+        Params->TryGetStringField(TEXT("name"), ActorName);
+    }
+
+    FString AssetPath;
+    if (!Params->TryGetStringField(TEXT("asset_path"), AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'asset_path' parameter"));
+    }
+
+    FString ComponentName;
+    Params->TryGetStringField(TEXT("component_name"), ComponentName);
+
+    AActor* TargetActor = nullptr;
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && Actor->GetName() == ActorName)
+        {
+            TargetActor = Actor;
+            break;
+        }
+    }
+
+    if (!TargetActor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+    }
+
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(AssetPath);
+    bool bSet = false;
+    TArray<UActorComponent*> Components;
+    TargetActor->GetComponents(Components);
+    for (UActorComponent* Component : Components)
+    {
+        if (!ComponentName.IsEmpty() && Component->GetName() != ComponentName)
+        {
+            continue;
+        }
+        if (UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(Component))
+        {
+            if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Asset))
+            {
+                StaticMeshComponent->SetStaticMesh(StaticMesh);
+                bSet = true;
+                break;
+            }
+        }
+        if (USkeletalMeshComponent* SkeletalMeshComponent = Cast<USkeletalMeshComponent>(Component))
+        {
+            if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(Asset))
+            {
+                SkeletalMeshComponent->SetSkeletalMesh(SkeletalMesh);
+                bSet = true;
+                break;
+            }
+        }
+    }
+
+    if (!bSet)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No compatible mesh component found or asset type mismatched"));
+    }
+
+    return FUnrealMCPCommonUtils::ActorToJsonObject(TargetActor, true);
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetActorComponentMaterial(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorName;
+    if (!Params->TryGetStringField(TEXT("actor_name"), ActorName))
+    {
+        Params->TryGetStringField(TEXT("name"), ActorName);
+    }
+
+    FString ComponentName;
+    Params->TryGetStringField(TEXT("component_name"), ComponentName);
+
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        Params->TryGetStringField(TEXT("material"), MaterialPath);
+    }
+
+    int32 MaterialIndex = 0;
+    Params->TryGetNumberField(TEXT("material_index"), MaterialIndex);
+
+    UMaterialInterface* Material = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    AActor* TargetActor = nullptr;
+    TArray<AActor*> AllActors;
+    UGameplayStatics::GetAllActorsOfClass(GWorld, AActor::StaticClass(), AllActors);
+    for (AActor* Actor : AllActors)
+    {
+        if (Actor && Actor->GetName() == ActorName)
+        {
+            TargetActor = Actor;
+            break;
+        }
+    }
+
+    if (!TargetActor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+    }
+
+    bool bSet = false;
+    TArray<UActorComponent*> Components;
+    TargetActor->GetComponents(Components);
+    for (UActorComponent* Component : Components)
+    {
+        UMeshComponent* MeshComponent = Cast<UMeshComponent>(Component);
+        if (!MeshComponent)
+        {
+            continue;
+        }
+        if (!ComponentName.IsEmpty() && MeshComponent->GetName() != ComponentName)
+        {
+            continue;
+        }
+        MeshComponent->SetMaterial(MaterialIndex, Material);
+        bSet = true;
+        break;
+    }
+
+    if (!bSet)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No matching mesh component found"));
+    }
+
+    return FUnrealMCPCommonUtils::ActorToJsonObject(TargetActor, true);
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialParameter(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    FString ParameterName;
+    if (!Params->TryGetStringField(TEXT("parameter_name"), ParameterName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'parameter_name' parameter"));
+    }
+
+    UObject* Asset = UEditorAssetLibrary::LoadAsset(MaterialPath);
+    if (!Asset)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found: %s"), *MaterialPath));
+    }
+
+    FString ParameterType = TEXT("scalar");
+    Params->TryGetStringField(TEXT("parameter_type"), ParameterType);
+
+    bool bSet = false;
+    if (ParameterType.Equals(TEXT("scalar"), ESearchCase::IgnoreCase))
+    {
+        double NumberValue = 0.0;
+        if (!Params->TryGetNumberField(TEXT("value"), NumberValue))
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing numeric 'value' for scalar parameter"));
+        }
+
+        if (UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(Asset))
+        {
+            MIC->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(FName(*ParameterName)), (float)NumberValue);
+            bSet = true;
+        }
+        else if (UMaterial* Material = Cast<UMaterial>(Asset))
+        {
+            bSet = Material->SetScalarParameterValueEditorOnly(FName(*ParameterName), (float)NumberValue);
+        }
+    }
+    else if (ParameterType.Equals(TEXT("vector"), ESearchCase::IgnoreCase))
+    {
+        const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
+        if (!Params->TryGetArrayField(TEXT("value"), ValueArray) || !ValueArray || ValueArray->Num() < 3)
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Vector parameter 'value' must be [R,G,B] or [R,G,B,A]"));
+        }
+
+        const float R = (float)(*ValueArray)[0]->AsNumber();
+        const float G = (float)(*ValueArray)[1]->AsNumber();
+        const float B = (float)(*ValueArray)[2]->AsNumber();
+        const float A = ValueArray->Num() > 3 ? (float)(*ValueArray)[3]->AsNumber() : 1.0f;
+        const FLinearColor ColorValue(R, G, B, A);
+
+        if (UMaterialInstanceConstant* MIC = Cast<UMaterialInstanceConstant>(Asset))
+        {
+            MIC->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(FName(*ParameterName)), ColorValue);
+            bSet = true;
+        }
+        else if (UMaterial* Material = Cast<UMaterial>(Asset))
+        {
+            bSet = Material->SetVectorParameterValueEditorOnly(FName(*ParameterName), ColorValue);
+        }
+    }
+
+    if (!bSet)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to set material parameter. For raw materials, the named parameter must already exist."));
+    }
+
+    Asset->MarkPackageDirty();
+    UEditorAssetLibrary::SaveLoadedAsset(Asset, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetStringField(TEXT("parameter_name"), ParameterName);
+    ResultObj->SetStringField(TEXT("parameter_type"), ParameterType);
     return ResultObj;
 }
 

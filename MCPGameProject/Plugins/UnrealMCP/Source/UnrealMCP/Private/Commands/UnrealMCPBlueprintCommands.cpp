@@ -8,6 +8,8 @@
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -21,6 +23,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/TimelineTemplate.h"
+#include "Engine/SkeletalMesh.h"
 #include "Curves/CurveFloat.h"
 #include "Curves/CurveVector.h"
 #include "Curves/CurveLinearColor.h"
@@ -85,6 +88,18 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCommand(const FString
     else if (CommandType == TEXT("set_static_mesh_properties"))
     {
         return HandleSetStaticMeshProperties(Params);
+    }
+    else if (CommandType == TEXT("set_skeletal_mesh_properties"))
+    {
+        return HandleSetSkeletalMeshProperties(Params);
+    }
+    else if (CommandType == TEXT("set_blueprint_component_material"))
+    {
+        return HandleSetBlueprintComponentMaterial(Params);
+    }
+    else if (CommandType == TEXT("attach_blueprint_component"))
+    {
+        return HandleAttachBlueprintComponent(Params);
     }
     else if (CommandType == TEXT("set_pawn_properties"))
     {
@@ -1396,6 +1411,185 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetStaticMeshProperti
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("component"), ComponentName);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetSkeletalMeshProperties(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString ComponentName;
+    if (!Params->TryGetStringField(TEXT("component_name"), ComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'component_name' parameter"));
+    }
+
+    FString SkeletalMeshPath;
+    if (!Params->TryGetStringField(TEXT("skeletal_mesh"), SkeletalMeshPath) &&
+        !Params->TryGetStringField(TEXT("mesh"), SkeletalMeshPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'skeletal_mesh' parameter"));
+    }
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint || !Blueprint->SimpleConstructionScript)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    USCS_Node* ComponentNode = Blueprint->SimpleConstructionScript->FindSCSNode(FName(*ComponentName));
+    if (!ComponentNode)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+    }
+
+    USkeletalMeshComponent* SkeletalMeshComponent = Cast<USkeletalMeshComponent>(ComponentNode->ComponentTemplate);
+    if (!SkeletalMeshComponent)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a skeletal mesh component"));
+    }
+
+    USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(UEditorAssetLibrary::LoadAsset(SkeletalMeshPath));
+    if (!SkeletalMesh)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Skeletal mesh not found: %s"), *SkeletalMeshPath));
+    }
+
+    SkeletalMeshComponent->SetSkeletalMesh(SkeletalMesh);
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    FUnrealMCPCommonUtils::SaveBlueprintAsset(Blueprint);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("component"), ComponentName);
+    ResultObj->SetStringField(TEXT("skeletal_mesh"), SkeletalMeshPath);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetBlueprintComponentMaterial(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString ComponentName;
+    if (!Params->TryGetStringField(TEXT("component_name"), ComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'component_name' parameter"));
+    }
+
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath) &&
+        !Params->TryGetStringField(TEXT("material"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    int32 MaterialIndex = 0;
+    Params->TryGetNumberField(TEXT("material_index"), MaterialIndex);
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint || !Blueprint->SimpleConstructionScript)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    USCS_Node* ComponentNode = Blueprint->SimpleConstructionScript->FindSCSNode(FName(*ComponentName));
+    UMeshComponent* MeshComponent = ComponentNode ? Cast<UMeshComponent>(ComponentNode->ComponentTemplate) : nullptr;
+    if (!MeshComponent)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a mesh component"));
+    }
+
+    UMaterialInterface* Material = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material not found: %s"), *MaterialPath));
+    }
+
+    MeshComponent->SetMaterial(MaterialIndex, Material);
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    FUnrealMCPCommonUtils::SaveBlueprintAsset(Blueprint);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("component"), ComponentName);
+    ResultObj->SetStringField(TEXT("material"), MaterialPath);
+    ResultObj->SetNumberField(TEXT("material_index"), MaterialIndex);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleAttachBlueprintComponent(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString ChildComponentName;
+    if (!Params->TryGetStringField(TEXT("child_component_name"), ChildComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'child_component_name' parameter"));
+    }
+
+    FString ParentComponentName;
+    if (!Params->TryGetStringField(TEXT("parent_component_name"), ParentComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'parent_component_name' parameter"));
+    }
+
+    FString SocketName;
+    Params->TryGetStringField(TEXT("socket_name"), SocketName);
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint || !Blueprint->SimpleConstructionScript)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript;
+    USCS_Node* ChildNode = SCS->FindSCSNode(FName(*ChildComponentName));
+    USCS_Node* ParentNode = SCS->FindSCSNode(FName(*ParentComponentName));
+    if (!ChildNode || !ParentNode)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Child or parent component not found"));
+    }
+
+    if (!Cast<USceneComponent>(ChildNode->ComponentTemplate) || !Cast<USceneComponent>(ParentNode->ComponentTemplate))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Both child and parent must be scene components"));
+    }
+
+    const bool bWasRootNode = SCS->FindParentNode(ChildNode) == nullptr;
+    if (USCS_Node* OldParent = SCS->FindParentNode(ChildNode))
+    {
+        OldParent->RemoveChildNode(ChildNode, false);
+    }
+    else
+    {
+        SCS->RemoveNode(ChildNode, false);
+    }
+
+    ParentNode->AddChildNode(ChildNode, bWasRootNode);
+    ChildNode->SetParent(ParentNode);
+    ChildNode->AttachToName = FName(*SocketName);
+    SCS->ValidateSceneRootNodes();
+
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    FUnrealMCPCommonUtils::SaveBlueprintAsset(Blueprint);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("child_component_name"), ChildComponentName);
+    ResultObj->SetStringField(TEXT("parent_component_name"), ParentComponentName);
+    ResultObj->SetStringField(TEXT("socket_name"), SocketName);
     return ResultObj;
 }
 

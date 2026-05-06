@@ -28,6 +28,11 @@ private:
     TSharedPtr<FJsonObject> HandleInspectSelectedObjects(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleInspectComponentCollision(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleFindAssetReferences(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleListAssetsByClass(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSpawnMeshActorFromAsset(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSetActorMeshAsset(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSetActorComponentMaterial(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSetMaterialParameter(const TSharedPtr<FJsonObject>& Params);
 
     // Blueprint actor spawning
     TSharedPtr<FJsonObject> HandleSpawnBlueprintActor(const TSharedPtr<FJsonObject>& Params);

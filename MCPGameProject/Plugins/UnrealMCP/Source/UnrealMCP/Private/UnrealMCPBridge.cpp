@@ -106,6 +106,11 @@ TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
     Commands.Add(MakeCommand(TEXT("inspect_selected_objects"), TEXT("editor"), TEXT("Inspect currently selected editor objects.")));
     Commands.Add(MakeCommand(TEXT("inspect_component_collision"), TEXT("editor"), TEXT("Inspect primitive component collision settings on an actor.")));
     Commands.Add(MakeCommand(TEXT("find_asset_references"), TEXT("editor"), TEXT("Find asset referencers and dependencies.")));
+    Commands.Add(MakeCommand(TEXT("list_assets_by_class"), TEXT("editor"), TEXT("List assets by class, path, and optional name substring.")));
+    Commands.Add(MakeCommand(TEXT("spawn_mesh_actor_from_asset"), TEXT("editor"), TEXT("Spawn a StaticMeshActor or SkeletalMeshActor from a mesh asset.")));
+    Commands.Add(MakeCommand(TEXT("set_actor_mesh_asset"), TEXT("editor"), TEXT("Set a static or skeletal mesh asset on an actor component.")));
+    Commands.Add(MakeCommand(TEXT("set_actor_component_material"), TEXT("editor"), TEXT("Set a material slot on an actor mesh component.")));
+    Commands.Add(MakeCommand(TEXT("set_material_parameter"), TEXT("editor"), TEXT("Set scalar or vector parameters on a Material or MaterialInstanceConstant.")));
     Commands.Add(MakeCommand(TEXT("spawn_blueprint_actor"), TEXT("editor"), TEXT("Spawn an actor from a Blueprint.")));
     Commands.Add(MakeCommand(TEXT("open_level"), TEXT("editor"), TEXT("Open an editor level by package path or filename.")));
     Commands.Add(MakeCommand(TEXT("save_current_level"), TEXT("editor"), TEXT("Save the currently open editor level.")));
@@ -119,6 +124,9 @@ TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
     Commands.Add(MakeCommand(TEXT("compile_blueprint"), TEXT("blueprint"), TEXT("Compile a Blueprint.")));
     Commands.Add(MakeCommand(TEXT("set_blueprint_property"), TEXT("blueprint"), TEXT("Set a Blueprint class default property.")));
     Commands.Add(MakeCommand(TEXT("set_static_mesh_properties"), TEXT("blueprint"), TEXT("Set static mesh asset on a component template.")));
+    Commands.Add(MakeCommand(TEXT("set_skeletal_mesh_properties"), TEXT("blueprint"), TEXT("Set skeletal mesh asset on a component template.")));
+    Commands.Add(MakeCommand(TEXT("set_blueprint_component_material"), TEXT("blueprint"), TEXT("Set a material slot on a Blueprint mesh component template.")));
+    Commands.Add(MakeCommand(TEXT("attach_blueprint_component"), TEXT("blueprint"), TEXT("Attach one Blueprint scene component template under another.")));
     Commands.Add(MakeCommand(TEXT("set_pawn_properties"), TEXT("blueprint"), TEXT("Set common Pawn defaults.")));
     Commands.Add(MakeCommand(TEXT("inspect_blueprint_components"), TEXT("blueprint"), TEXT("Inspect Blueprint component tree, template properties, and collision.")));
     Commands.Add(MakeCommand(TEXT("inspect_blueprint_defaults"), TEXT("blueprint"), TEXT("Inspect Blueprint CDO defaults.")));
@@ -137,7 +145,8 @@ TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
     Commands.Add(MakeCommand(TEXT("remove_blueprint_component_and_linked_nodes"), TEXT("blueprint_node"), TEXT("Remove a component template and directly linked generated nodes.")));
     Commands.Add(MakeCommand(TEXT("remove_blueprint_actor_overlap_nodes"), TEXT("blueprint_node"), TEXT("Remove legacy actor overlap door chains.")));
 
-    Commands.Add(MakeCommand(TEXT("create_input_mapping"), TEXT("project"), TEXT("Create an input mapping.")));
+    Commands.Add(MakeCommand(TEXT("create_input_mapping"), TEXT("project"), TEXT("Create an action or axis input mapping.")));
+    Commands.Add(MakeCommand(TEXT("inspect_input_mappings"), TEXT("project"), TEXT("List action and axis input mappings.")));
 
     Commands.Add(MakeCommand(TEXT("create_umg_widget_blueprint"), TEXT("umg"), TEXT("Create a Widget Blueprint.")));
     Commands.Add(MakeCommand(TEXT("add_text_block_to_widget"), TEXT("umg"), TEXT("Add a TextBlock widget.")));
@@ -313,6 +322,11 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("inspect_selected_objects") ||
                      CommandType == TEXT("inspect_component_collision") ||
                      CommandType == TEXT("find_asset_references") ||
+                     CommandType == TEXT("list_assets_by_class") ||
+                     CommandType == TEXT("spawn_mesh_actor_from_asset") ||
+                     CommandType == TEXT("set_actor_mesh_asset") ||
+                     CommandType == TEXT("set_actor_component_material") ||
+                     CommandType == TEXT("set_material_parameter") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
                      CommandType == TEXT("open_level") ||
                      CommandType == TEXT("save_current_level") ||
@@ -329,6 +343,9 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("compile_blueprint") || 
                      CommandType == TEXT("set_blueprint_property") || 
                      CommandType == TEXT("set_static_mesh_properties") ||
+                     CommandType == TEXT("set_skeletal_mesh_properties") ||
+                     CommandType == TEXT("set_blueprint_component_material") ||
+                     CommandType == TEXT("attach_blueprint_component") ||
                      CommandType == TEXT("set_pawn_properties") ||
                      CommandType == TEXT("inspect_blueprint_components") ||
                      CommandType == TEXT("inspect_blueprint_defaults") ||
@@ -354,7 +371,8 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                 ResultJson = BlueprintNodeCommands->HandleCommand(CommandType, Params);
             }
             // Project Commands
-            else if (CommandType == TEXT("create_input_mapping"))
+            else if (CommandType == TEXT("create_input_mapping") ||
+                     CommandType == TEXT("inspect_input_mappings"))
             {
                 ResultJson = ProjectCommands->HandleCommand(CommandType, Params);
             }

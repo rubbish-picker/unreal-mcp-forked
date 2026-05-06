@@ -31,6 +31,35 @@ Inspect Timeline templates inside a Blueprint, including length, playback flags,
 **Parameters:**
 - `blueprint_name` (string) - Blueprint asset name or path
 
+### set_skeletal_mesh_properties
+
+Set a SkeletalMesh asset on a Blueprint skeletal mesh component template.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+- `component_name` (string) - Skeletal mesh component name
+- `skeletal_mesh` (string) - SkeletalMesh asset path
+
+### set_blueprint_component_material
+
+Set a material slot on a Blueprint mesh component template.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+- `component_name` (string) - Mesh component name
+- `material_path` (string) - Material or material instance path
+- `material_index` (integer, optional) - Material slot index
+
+### attach_blueprint_component
+
+Attach one Blueprint scene component template under another. This is the low-level primitive used for setups like `SpringArm -> Camera`.
+
+**Parameters:**
+- `blueprint_name` (string) - Blueprint asset name or path
+- `child_component_name` (string) - Child scene component
+- `parent_component_name` (string) - Parent scene component
+- `socket_name` (string, optional) - Optional socket/bone name
+
 ### create_blueprint
 
 Create a new Blueprint class.

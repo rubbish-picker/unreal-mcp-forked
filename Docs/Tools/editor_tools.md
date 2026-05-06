@@ -49,6 +49,54 @@ Find package referencers and dependencies for an asset.
 **Parameters:**
 - `asset_path` (string) - Asset package path such as `/Game/Project101/BluePrint/BP_Door`
 
+### list_assets_by_class
+
+List assets by Unreal class, path, and optional name substring. Useful before choosing a mesh, material, animation, or Blueprint asset.
+
+**Parameters:**
+- `class_name` (string) - Class name such as `StaticMesh`, `SkeletalMesh`, `Material`, or `MaterialInstanceConstant`
+- `path` (string, optional) - Package path to search, default `/Game`
+- `name_contains` (string, optional) - Optional asset-name substring filter
+- `max_results` (integer, optional) - Maximum number of assets to return
+
+### spawn_mesh_actor_from_asset
+
+Spawn a `StaticMeshActor` or `SkeletalMeshActor` from a mesh asset.
+
+**Parameters:**
+- `asset_path` (string) - StaticMesh or SkeletalMesh asset path
+- `actor_name` (string, optional) - New actor name
+- `location`, `rotation`, `scale` (arrays, optional) - Actor transform
+
+### set_actor_mesh_asset
+
+Set a StaticMesh or SkeletalMesh asset on an actor mesh component.
+
+**Parameters:**
+- `actor_name` (string) - Actor name
+- `asset_path` (string) - StaticMesh or SkeletalMesh asset path
+- `component_name` (string, optional) - Mesh component name
+
+### set_actor_component_material
+
+Set a material slot on an actor mesh component.
+
+**Parameters:**
+- `actor_name` (string) - Actor name
+- `material_path` (string) - Material or material instance path
+- `component_name` (string, optional) - Mesh component name
+- `material_index` (integer, optional) - Material slot index
+
+### set_material_parameter
+
+Set scalar or vector parameters on a `Material` or `MaterialInstanceConstant`.
+
+**Parameters:**
+- `material_path` (string) - Material asset path
+- `parameter_name` (string) - Existing parameter name, for example `Metallic`
+- `parameter_type` (string, optional) - `scalar` or `vector`
+- `value` (number or array) - Scalar number or `[R,G,B,A]`
+
 ### open_level
 
 Open a level in the editor.

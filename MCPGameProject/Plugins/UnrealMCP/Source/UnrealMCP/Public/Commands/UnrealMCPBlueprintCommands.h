@@ -25,6 +25,9 @@ private:
     TSharedPtr<FJsonObject> HandleSetBlueprintProperty(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleSetStaticMeshProperties(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleSetPawnProperties(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSetSkeletalMeshProperties(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSetBlueprintComponentMaterial(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleAttachBlueprintComponent(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleInspectBlueprintComponents(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleInspectBlueprintDefaults(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleInspectBlueprintTimelines(const TSharedPtr<FJsonObject>& Params);

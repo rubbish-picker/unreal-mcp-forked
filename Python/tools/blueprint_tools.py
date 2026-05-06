@@ -487,4 +487,89 @@ def register_blueprint_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
+    @mcp.tool()
+    def set_skeletal_mesh_properties(
+        ctx: Context,
+        blueprint_name: str,
+        component_name: str,
+        skeletal_mesh: str
+    ) -> Dict[str, Any]:
+        """Set a SkeletalMesh asset on a Blueprint skeletal mesh component."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("set_skeletal_mesh_properties", {
+                "blueprint_name": blueprint_name,
+                "component_name": component_name,
+                "skeletal_mesh": skeletal_mesh
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error setting skeletal mesh properties: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def set_blueprint_component_material(
+        ctx: Context,
+        blueprint_name: str,
+        component_name: str,
+        material_path: str,
+        material_index: int = 0
+    ) -> Dict[str, Any]:
+        """Set a material slot on a Blueprint mesh component template."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("set_blueprint_component_material", {
+                "blueprint_name": blueprint_name,
+                "component_name": component_name,
+                "material_path": material_path,
+                "material_index": material_index
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error setting blueprint component material: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def attach_blueprint_component(
+        ctx: Context,
+        blueprint_name: str,
+        child_component_name: str,
+        parent_component_name: str,
+        socket_name: str = ""
+    ) -> Dict[str, Any]:
+        """Attach one Blueprint scene component template under another."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("attach_blueprint_component", {
+                "blueprint_name": blueprint_name,
+                "child_component_name": child_component_name,
+                "parent_component_name": parent_component_name,
+                "socket_name": socket_name
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error attaching blueprint component: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
     logger.info("Blueprint tools registered successfully") 
