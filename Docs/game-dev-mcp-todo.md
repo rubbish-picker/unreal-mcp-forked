@@ -43,13 +43,18 @@ This checklist tracks low-level MCP capabilities needed to build real Unreal gam
 - [x] `inspect_material_parameters`: list scalar/vector/texture/static switch parameters.
 - [x] `set_material_texture_parameter`: set texture parameter.
 - [x] `set_material_static_switch_parameter`: set static switch parameter.
-- [ ] Optional later: material graph node creation and connection.
-- [ ] Smoke tests:
-- [ ] Create a material instance from a known engine material.
+- [x] `inspect_material_expressions`: inspect material graph nodes, pins, and links.
+- [x] `add_material_expression_node`: add low-level material graph expression nodes.
+- [x] `connect_material_expression_to_property`: connect an expression to BaseColor/Metallic/Roughness/etc.
+- [x] `connect_material_expressions`: connect expression nodes together.
+- [x] `recompile_material`: recompile and save a raw Material after graph edits.
+- [x] Smoke tests:
+- [x] Create a material instance from a generated material with real parameter nodes.
 - [x] Create and delete a temporary Material.
 - [x] Create, save, inspect, and delete a temporary MaterialInstanceConstant.
 - [x] Verify missing scalar/texture/static switch parameters return explicit errors.
-- [ ] Set scalar/vector/texture/static switch parameters on a material that actually exposes them.
+- [x] Set scalar/vector/texture/static switch parameters on a material that actually exposes them.
+- [x] Create parameter expression nodes, connect them to material properties, inspect them, and recompile.
 - [x] Save/delete test material instance.
 
 ## Batch 4: Enhanced Input

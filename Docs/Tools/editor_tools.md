@@ -221,6 +221,59 @@ Set a static switch parameter on a Material or MaterialInstance.
 - `parameter_name` (string) - Static switch parameter name
 - `value` (boolean) - Switch value
 
+### inspect_material_expressions
+
+Inspect material graph expression nodes, pins, and links.
+
+**Parameters:**
+- `material_path` (string) - Raw Material asset path
+
+### add_material_expression_node
+
+Add a low-level material graph expression node.
+
+**Parameters:**
+- `material_path` (string) - Raw Material asset path
+- `expression_type` (string) - Expression type such as `ScalarParameter`, `VectorParameter`, `TextureSampleParameter2D`, `StaticSwitchParameter`, `Constant`, `Multiply`, `Add`, `Lerp`, or `TextureCoordinate`
+- `parameter_name` (string, optional) - Parameter name for parameter expressions
+- `default_value` (any, optional) - Default parameter value
+- `value` (any, optional) - Constant value or alternate default value
+- `texture_path` (string, optional) - Texture asset for texture parameter nodes
+- `node_x` (integer, optional) - Material editor X position
+- `node_y` (integer, optional) - Material editor Y position
+- `description` (string, optional) - Node description
+- `recompile` (boolean, optional) - Recompile after edit
+
+### connect_material_expression_to_property
+
+Connect a material expression output to a material property input.
+
+**Parameters:**
+- `material_path` (string) - Raw Material asset path
+- `expression_id` (string) - Expression GUID returned by `add_material_expression_node` or `inspect_material_expressions`
+- `property_name` (string) - Property such as `BaseColor`, `Metallic`, `Roughness`, `EmissiveColor`, `Opacity`, `OpacityMask`, `Normal`, `WorldPositionOffset`, or `AmbientOcclusion`
+- `output_name` (string, optional) - Output pin name; empty uses the first output
+- `recompile` (boolean, optional) - Recompile after edit
+
+### connect_material_expressions
+
+Connect two material expression nodes.
+
+**Parameters:**
+- `material_path` (string) - Raw Material asset path
+- `from_expression_id` (string) - Source expression GUID
+- `to_expression_id` (string) - Target expression GUID
+- `from_output_name` (string, optional) - Source output pin; empty uses first output
+- `to_input_name` (string, optional) - Target input pin; empty uses first input
+- `recompile` (boolean, optional) - Recompile after edit
+
+### recompile_material
+
+Recompile and save a Material asset after graph edits.
+
+**Parameters:**
+- `material_path` (string) - Raw Material asset path
+
 ### open_level
 
 Open a level in the editor.

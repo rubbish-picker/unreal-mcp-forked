@@ -43,9 +43,28 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialExpression.h"
+#include "Materials/MaterialExpressionAdd.h"
+#include "Materials/MaterialExpressionAppendVector.h"
+#include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionConstant2Vector.h"
+#include "Materials/MaterialExpressionConstant3Vector.h"
+#include "Materials/MaterialExpressionConstant4Vector.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionOneMinus.h"
+#include "Materials/MaterialExpressionParameter.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionStaticSwitchParameter.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionTextureSampleParameter.h"
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialParameters.h"
+#include "MaterialEditingLibrary.h"
+#include "SceneTypes.h"
 #include "UObject/Package.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
@@ -182,6 +201,26 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("set_material_static_switch_parameter"))
     {
         return HandleSetMaterialStaticSwitchParameter(Params);
+    }
+    else if (CommandType == TEXT("inspect_material_expressions"))
+    {
+        return HandleInspectMaterialExpressions(Params);
+    }
+    else if (CommandType == TEXT("add_material_expression_node"))
+    {
+        return HandleAddMaterialExpressionNode(Params);
+    }
+    else if (CommandType == TEXT("connect_material_expression_to_property"))
+    {
+        return HandleConnectMaterialExpressionToProperty(Params);
+    }
+    else if (CommandType == TEXT("connect_material_expressions"))
+    {
+        return HandleConnectMaterialExpressions(Params);
+    }
+    else if (CommandType == TEXT("recompile_material"))
+    {
+        return HandleRecompileMaterial(Params);
     }
     // Blueprint actor spawning
     else if (CommandType == TEXT("spawn_blueprint_actor"))
@@ -1864,6 +1903,278 @@ static bool MaterialHasParameterOfType(UMaterialInterface* Material, EMaterialPa
     return false;
 }
 
+static UMaterialExpression* FindMaterialExpressionById(UMaterial* Material, const FString& ExpressionId)
+{
+    if (!Material)
+    {
+        return nullptr;
+    }
+
+    FGuid TargetGuid;
+    const bool bHasGuid = FGuid::Parse(ExpressionId, TargetGuid);
+    for (UMaterialExpression* Expression : Material->GetExpressions())
+    {
+        if (!Expression)
+        {
+            continue;
+        }
+
+        if ((bHasGuid && Expression->MaterialExpressionGuid == TargetGuid) ||
+            Expression->GetName() == ExpressionId ||
+            Expression->GetPathName() == ExpressionId)
+        {
+            return Expression;
+        }
+    }
+    return nullptr;
+}
+
+static TSubclassOf<UMaterialExpression> ResolveMaterialExpressionClass(const FString& ExpressionType)
+{
+    const FString Normalized = ExpressionType.Replace(TEXT(" "), TEXT("")).Replace(TEXT("_"), TEXT(""));
+    if (Normalized.Equals(TEXT("ScalarParameter"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("MaterialExpressionScalarParameter"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionScalarParameter::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("VectorParameter"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("MaterialExpressionVectorParameter"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionVectorParameter::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("TextureParameter"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("TextureSampleParameter2D"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("MaterialExpressionTextureSampleParameter2D"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionTextureSampleParameter2D::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("StaticSwitchParameter"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("MaterialExpressionStaticSwitchParameter"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionStaticSwitchParameter::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("Constant"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("Constant1"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("MaterialExpressionConstant"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionConstant::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("Constant2Vector"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("Constant2"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionConstant2Vector::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("Constant3Vector"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("Constant3"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionConstant3Vector::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("Constant4Vector"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("Constant4"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionConstant4Vector::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("Multiply"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionMultiply::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("Add"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionAdd::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("LinearInterpolate"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("Lerp"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionLinearInterpolate::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("AppendVector"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionAppendVector::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("OneMinus"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionOneMinus::StaticClass();
+    }
+    if (Normalized.Equals(TEXT("TextureCoordinate"), ESearchCase::IgnoreCase) ||
+        Normalized.Equals(TEXT("TexCoord"), ESearchCase::IgnoreCase))
+    {
+        return UMaterialExpressionTextureCoordinate::StaticClass();
+    }
+    return nullptr;
+}
+
+static bool ResolveMaterialProperty(const FString& PropertyName, EMaterialProperty& OutProperty)
+{
+    const FString Normalized = PropertyName.Replace(TEXT(" "), TEXT("")).Replace(TEXT("_"), TEXT(""));
+    if (Normalized.Equals(TEXT("BaseColor"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPBaseColor"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_BaseColor;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("Metallic"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPMetallic"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_Metallic;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("Specular"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPSpecular"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_Specular;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("Roughness"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPRoughness"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_Roughness;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("EmissiveColor"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("Emissive"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPEmissiveColor"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_EmissiveColor;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("Opacity"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPOpacity"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_Opacity;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("OpacityMask"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPOpacityMask"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_OpacityMask;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("Normal"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("MPNormal"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_Normal;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("WorldPositionOffset"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("WPO"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_WorldPositionOffset;
+        return true;
+    }
+    if (Normalized.Equals(TEXT("AmbientOcclusion"), ESearchCase::IgnoreCase) || Normalized.Equals(TEXT("AO"), ESearchCase::IgnoreCase))
+    {
+        OutProperty = MP_AmbientOcclusion;
+        return true;
+    }
+    return false;
+}
+
+static bool ReadLinearColorField(const TSharedPtr<FJsonObject>& Params, const FString& FieldName, FLinearColor& OutColor)
+{
+    const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
+    if (!Params->TryGetArrayField(FieldName, ValueArray) || !ValueArray || ValueArray->Num() < 3)
+    {
+        return false;
+    }
+
+    OutColor.R = (float)(*ValueArray)[0]->AsNumber();
+    OutColor.G = (float)(*ValueArray)[1]->AsNumber();
+    OutColor.B = (float)(*ValueArray)[2]->AsNumber();
+    OutColor.A = ValueArray->Num() > 3 ? (float)(*ValueArray)[3]->AsNumber() : 1.0f;
+    return true;
+}
+
+static TSharedPtr<FJsonObject> MaterialExpressionToJson(UMaterialExpression* Expression)
+{
+    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+    if (!Expression)
+    {
+        return Obj;
+    }
+
+    Obj->SetStringField(TEXT("id"), Expression->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens));
+    Obj->SetStringField(TEXT("name"), Expression->GetName());
+    Obj->SetStringField(TEXT("class"), Expression->GetClass()->GetName());
+    Obj->SetNumberField(TEXT("node_x"), Expression->MaterialExpressionEditorX);
+    Obj->SetNumberField(TEXT("node_y"), Expression->MaterialExpressionEditorY);
+    Obj->SetStringField(TEXT("description"), Expression->Desc);
+    Obj->SetBoolField(TEXT("is_parameter"), Expression->HasAParameterName());
+    if (Expression->HasAParameterName())
+    {
+        Obj->SetStringField(TEXT("parameter_name"), Expression->GetParameterName().ToString());
+    }
+
+    if (UMaterialExpressionScalarParameter* Scalar = Cast<UMaterialExpressionScalarParameter>(Expression))
+    {
+        Obj->SetNumberField(TEXT("default_value"), Scalar->DefaultValue);
+    }
+    else if (UMaterialExpressionVectorParameter* Vector = Cast<UMaterialExpressionVectorParameter>(Expression))
+    {
+        TArray<TSharedPtr<FJsonValue>> ColorArray;
+        ColorArray.Add(MakeShared<FJsonValueNumber>(Vector->DefaultValue.R));
+        ColorArray.Add(MakeShared<FJsonValueNumber>(Vector->DefaultValue.G));
+        ColorArray.Add(MakeShared<FJsonValueNumber>(Vector->DefaultValue.B));
+        ColorArray.Add(MakeShared<FJsonValueNumber>(Vector->DefaultValue.A));
+        Obj->SetArrayField(TEXT("default_value"), ColorArray);
+    }
+    else if (UMaterialExpressionTextureSampleParameter2D* TextureParameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression))
+    {
+        Obj->SetStringField(TEXT("texture"), TextureParameter->Texture ? TextureParameter->Texture->GetPathName() : TEXT(""));
+    }
+    else if (UMaterialExpressionStaticSwitchParameter* StaticSwitch = Cast<UMaterialExpressionStaticSwitchParameter>(Expression))
+    {
+        Obj->SetBoolField(TEXT("default_value"), StaticSwitch->DefaultValue != 0);
+    }
+    else if (UMaterialExpressionConstant* Constant = Cast<UMaterialExpressionConstant>(Expression))
+    {
+        Obj->SetNumberField(TEXT("value"), Constant->R);
+    }
+    else if (UMaterialExpressionConstant2Vector* Constant2 = Cast<UMaterialExpressionConstant2Vector>(Expression))
+    {
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Constant2->R));
+        Values.Add(MakeShared<FJsonValueNumber>(Constant2->G));
+        Obj->SetArrayField(TEXT("value"), Values);
+    }
+    else if (UMaterialExpressionConstant3Vector* Constant3 = Cast<UMaterialExpressionConstant3Vector>(Expression))
+    {
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Constant3->Constant.R));
+        Values.Add(MakeShared<FJsonValueNumber>(Constant3->Constant.G));
+        Values.Add(MakeShared<FJsonValueNumber>(Constant3->Constant.B));
+        Obj->SetArrayField(TEXT("value"), Values);
+    }
+    else if (UMaterialExpressionConstant4Vector* Constant4 = Cast<UMaterialExpressionConstant4Vector>(Expression))
+    {
+        TArray<TSharedPtr<FJsonValue>> Values;
+        Values.Add(MakeShared<FJsonValueNumber>(Constant4->Constant.R));
+        Values.Add(MakeShared<FJsonValueNumber>(Constant4->Constant.G));
+        Values.Add(MakeShared<FJsonValueNumber>(Constant4->Constant.B));
+        Values.Add(MakeShared<FJsonValueNumber>(Constant4->Constant.A));
+        Obj->SetArrayField(TEXT("value"), Values);
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Inputs;
+    const int32 InputCount = Expression->CountInputs();
+    for (int32 Index = 0; Index < InputCount; ++Index)
+    {
+        FExpressionInput* Input = Expression->GetInput(Index);
+        TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
+        InputObj->SetNumberField(TEXT("index"), Index);
+        InputObj->SetStringField(TEXT("name"), Expression->GetInputName(Index).ToString());
+        if (Input && Input->Expression)
+        {
+            InputObj->SetStringField(TEXT("connected_expression_id"), Input->Expression->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens));
+            InputObj->SetStringField(TEXT("connected_expression_name"), Input->Expression->GetName());
+            InputObj->SetNumberField(TEXT("output_index"), Input->OutputIndex);
+        }
+        Inputs.Add(MakeShared<FJsonValueObject>(InputObj));
+    }
+    Obj->SetArrayField(TEXT("inputs"), Inputs);
+
+    TArray<TSharedPtr<FJsonValue>> Outputs;
+    TArray<FExpressionOutput>& ExpressionOutputs = Expression->GetOutputs();
+    for (int32 Index = 0; Index < ExpressionOutputs.Num(); ++Index)
+    {
+        TSharedPtr<FJsonObject> OutputObj = MakeShared<FJsonObject>();
+        OutputObj->SetNumberField(TEXT("index"), Index);
+        OutputObj->SetStringField(TEXT("name"), ExpressionOutputs[Index].OutputName.ToString());
+        Outputs.Add(MakeShared<FJsonValueObject>(OutputObj));
+    }
+    Obj->SetArrayField(TEXT("outputs"), Outputs);
+    return Obj;
+}
+
 TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleInspectMaterialParameters(const TSharedPtr<FJsonObject>& Params)
 {
     FString MaterialPath;
@@ -2136,6 +2447,361 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSetMaterialStaticSwitchP
     ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
     ResultObj->SetStringField(TEXT("parameter_name"), ParameterName);
     ResultObj->SetBoolField(TEXT("value"), Value);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleInspectMaterialExpressions(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found or is not a raw Material: %s"), *MaterialPath));
+    }
+
+    TArray<TSharedPtr<FJsonValue>> Expressions;
+    for (UMaterialExpression* Expression : Material->GetExpressions())
+    {
+        Expressions.Add(MakeShared<FJsonValueObject>(MaterialExpressionToJson(Expression)));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetArrayField(TEXT("expressions"), Expressions);
+    ResultObj->SetNumberField(TEXT("expression_count"), Expressions.Num());
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleAddMaterialExpressionNode(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    FString ExpressionType;
+    if (!Params->TryGetStringField(TEXT("expression_type"), ExpressionType) &&
+        !Params->TryGetStringField(TEXT("expression_class"), ExpressionType))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'expression_type' parameter"));
+    }
+
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found or is not a raw Material: %s"), *MaterialPath));
+    }
+
+    TSubclassOf<UMaterialExpression> ExpressionClass = ResolveMaterialExpressionClass(ExpressionType);
+    if (!ExpressionClass)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unsupported material expression type: %s"), *ExpressionType));
+    }
+
+    int32 NodeX = 0;
+    int32 NodeY = 0;
+    Params->TryGetNumberField(TEXT("node_x"), NodeX);
+    Params->TryGetNumberField(TEXT("node_y"), NodeY);
+
+    UMaterialExpression* Expression = UMaterialEditingLibrary::CreateMaterialExpression(Material, ExpressionClass, NodeX, NodeY);
+    if (!Expression)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to create material expression: %s"), *ExpressionType));
+    }
+
+    FString Description;
+    if (Params->TryGetStringField(TEXT("description"), Description))
+    {
+        Expression->Desc = Description;
+    }
+
+    FString ParameterName;
+    if (Params->TryGetStringField(TEXT("parameter_name"), ParameterName))
+    {
+        if (UMaterialExpressionParameter* ParameterExpression = Cast<UMaterialExpressionParameter>(Expression))
+        {
+            ParameterExpression->SetParameterName(FName(*ParameterName));
+            if (!ParameterExpression->ExpressionGUID.IsValid())
+            {
+                ParameterExpression->ExpressionGUID = FGuid::NewGuid();
+            }
+        }
+        else if (UMaterialExpressionTextureSampleParameter* TextureParameter = Cast<UMaterialExpressionTextureSampleParameter>(Expression))
+        {
+            TextureParameter->SetParameterName(FName(*ParameterName));
+            if (!TextureParameter->ExpressionGUID.IsValid())
+            {
+                TextureParameter->ExpressionGUID = FGuid::NewGuid();
+            }
+        }
+    }
+
+    double NumberValue = 0.0;
+    if (UMaterialExpressionScalarParameter* Scalar = Cast<UMaterialExpressionScalarParameter>(Expression))
+    {
+        if (Params->TryGetNumberField(TEXT("default_value"), NumberValue) || Params->TryGetNumberField(TEXT("value"), NumberValue))
+        {
+            Scalar->DefaultValue = (float)NumberValue;
+        }
+    }
+    else if (UMaterialExpressionVectorParameter* Vector = Cast<UMaterialExpressionVectorParameter>(Expression))
+    {
+        FLinearColor ColorValue;
+        if (ReadLinearColorField(Params, TEXT("default_value"), ColorValue) || ReadLinearColorField(Params, TEXT("value"), ColorValue))
+        {
+            Vector->DefaultValue = ColorValue;
+        }
+    }
+    else if (UMaterialExpressionTextureSampleParameter2D* TextureParameter = Cast<UMaterialExpressionTextureSampleParameter2D>(Expression))
+    {
+        FString TexturePath;
+        if (Params->TryGetStringField(TEXT("texture_path"), TexturePath))
+        {
+            UTexture* Texture = Cast<UTexture>(UEditorAssetLibrary::LoadAsset(TexturePath));
+            if (!Texture)
+            {
+                return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Texture asset not found: %s"), *TexturePath));
+            }
+            TextureParameter->Texture = Texture;
+            TextureParameter->AutoSetSampleType();
+        }
+    }
+    else if (UMaterialExpressionStaticSwitchParameter* StaticSwitch = Cast<UMaterialExpressionStaticSwitchParameter>(Expression))
+    {
+        bool BoolValue = false;
+        if (Params->TryGetBoolField(TEXT("default_value"), BoolValue) || Params->TryGetBoolField(TEXT("value"), BoolValue))
+        {
+            StaticSwitch->DefaultValue = BoolValue;
+        }
+    }
+    else if (UMaterialExpressionConstant* Constant = Cast<UMaterialExpressionConstant>(Expression))
+    {
+        if (Params->TryGetNumberField(TEXT("value"), NumberValue) || Params->TryGetNumberField(TEXT("default_value"), NumberValue))
+        {
+            Constant->R = (float)NumberValue;
+        }
+    }
+    else if (UMaterialExpressionConstant2Vector* Constant2 = Cast<UMaterialExpressionConstant2Vector>(Expression))
+    {
+        const TArray<TSharedPtr<FJsonValue>>* ValueArray = nullptr;
+        if (Params->TryGetArrayField(TEXT("value"), ValueArray) && ValueArray && ValueArray->Num() >= 2)
+        {
+            Constant2->R = (float)(*ValueArray)[0]->AsNumber();
+            Constant2->G = (float)(*ValueArray)[1]->AsNumber();
+        }
+    }
+    else if (UMaterialExpressionConstant3Vector* Constant3 = Cast<UMaterialExpressionConstant3Vector>(Expression))
+    {
+        FLinearColor ColorValue;
+        if (ReadLinearColorField(Params, TEXT("value"), ColorValue) || ReadLinearColorField(Params, TEXT("default_value"), ColorValue))
+        {
+            Constant3->Constant = ColorValue;
+        }
+    }
+    else if (UMaterialExpressionConstant4Vector* Constant4 = Cast<UMaterialExpressionConstant4Vector>(Expression))
+    {
+        FLinearColor ColorValue;
+        if (ReadLinearColorField(Params, TEXT("value"), ColorValue) || ReadLinearColorField(Params, TEXT("default_value"), ColorValue))
+        {
+            Constant4->Constant = ColorValue;
+        }
+    }
+    else if (UMaterialExpressionMultiply* Multiply = Cast<UMaterialExpressionMultiply>(Expression))
+    {
+        double ConstA = 0.0;
+        double ConstB = 1.0;
+        if (Params->TryGetNumberField(TEXT("const_a"), ConstA))
+        {
+            Multiply->ConstA = (float)ConstA;
+        }
+        if (Params->TryGetNumberField(TEXT("const_b"), ConstB))
+        {
+            Multiply->ConstB = (float)ConstB;
+        }
+    }
+
+    bool bRecompile = true;
+    Params->TryGetBoolField(TEXT("recompile"), bRecompile);
+    if (bRecompile)
+    {
+        UMaterialEditingLibrary::RecompileMaterial(Material);
+    }
+
+    Material->PostEditChange();
+    Material->MarkPackageDirty();
+    UEditorAssetLibrary::SaveLoadedAsset(Material, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetObjectField(TEXT("expression"), MaterialExpressionToJson(Expression));
+    ResultObj->SetBoolField(TEXT("recompiled"), bRecompile);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleConnectMaterialExpressionToProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    FString ExpressionId;
+    if (!Params->TryGetStringField(TEXT("expression_id"), ExpressionId))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'expression_id' parameter"));
+    }
+
+    FString PropertyName;
+    if (!Params->TryGetStringField(TEXT("property_name"), PropertyName) &&
+        !Params->TryGetStringField(TEXT("material_property"), PropertyName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'property_name' parameter"));
+    }
+
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found or is not a raw Material: %s"), *MaterialPath));
+    }
+
+    UMaterialExpression* Expression = FindMaterialExpressionById(Material, ExpressionId);
+    if (!Expression)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Expression not found: %s"), *ExpressionId));
+    }
+
+    EMaterialProperty MaterialProperty;
+    if (!ResolveMaterialProperty(PropertyName, MaterialProperty))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unsupported material property: %s"), *PropertyName));
+    }
+
+    FString OutputName;
+    Params->TryGetStringField(TEXT("output_name"), OutputName);
+    const bool bConnected = UMaterialEditingLibrary::ConnectMaterialProperty(Expression, OutputName, MaterialProperty);
+    if (!bConnected)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to connect material expression to property"));
+    }
+
+    bool bRecompile = true;
+    Params->TryGetBoolField(TEXT("recompile"), bRecompile);
+    if (bRecompile)
+    {
+        UMaterialEditingLibrary::RecompileMaterial(Material);
+    }
+
+    Material->PostEditChange();
+    Material->MarkPackageDirty();
+    UEditorAssetLibrary::SaveLoadedAsset(Material, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetStringField(TEXT("expression_id"), Expression->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens));
+    ResultObj->SetStringField(TEXT("property_name"), PropertyName);
+    ResultObj->SetStringField(TEXT("output_name"), OutputName);
+    ResultObj->SetBoolField(TEXT("recompiled"), bRecompile);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleConnectMaterialExpressions(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    FString FromExpressionId;
+    if (!Params->TryGetStringField(TEXT("from_expression_id"), FromExpressionId))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'from_expression_id' parameter"));
+    }
+
+    FString ToExpressionId;
+    if (!Params->TryGetStringField(TEXT("to_expression_id"), ToExpressionId))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'to_expression_id' parameter"));
+    }
+
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found or is not a raw Material: %s"), *MaterialPath));
+    }
+
+    UMaterialExpression* FromExpression = FindMaterialExpressionById(Material, FromExpressionId);
+    UMaterialExpression* ToExpression = FindMaterialExpressionById(Material, ToExpressionId);
+    if (!FromExpression)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("From expression not found: %s"), *FromExpressionId));
+    }
+    if (!ToExpression)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("To expression not found: %s"), *ToExpressionId));
+    }
+
+    FString FromOutputName;
+    FString ToInputName;
+    Params->TryGetStringField(TEXT("from_output_name"), FromOutputName);
+    Params->TryGetStringField(TEXT("to_input_name"), ToInputName);
+
+    const bool bConnected = UMaterialEditingLibrary::ConnectMaterialExpressions(FromExpression, FromOutputName, ToExpression, ToInputName);
+    if (!bConnected)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to connect material expressions"));
+    }
+
+    bool bRecompile = true;
+    Params->TryGetBoolField(TEXT("recompile"), bRecompile);
+    if (bRecompile)
+    {
+        UMaterialEditingLibrary::RecompileMaterial(Material);
+    }
+
+    Material->PostEditChange();
+    Material->MarkPackageDirty();
+    UEditorAssetLibrary::SaveLoadedAsset(Material, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetStringField(TEXT("from_expression_id"), FromExpression->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens));
+    ResultObj->SetStringField(TEXT("to_expression_id"), ToExpression->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens));
+    ResultObj->SetStringField(TEXT("from_output_name"), FromOutputName);
+    ResultObj->SetStringField(TEXT("to_input_name"), ToInputName);
+    ResultObj->SetBoolField(TEXT("recompiled"), bRecompile);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleRecompileMaterial(const TSharedPtr<FJsonObject>& Params)
+{
+    FString MaterialPath;
+    if (!Params->TryGetStringField(TEXT("material_path"), MaterialPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'material_path' parameter"));
+    }
+
+    UMaterial* Material = Cast<UMaterial>(UEditorAssetLibrary::LoadAsset(MaterialPath));
+    if (!Material)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Material asset not found or is not a raw Material: %s"), *MaterialPath));
+    }
+
+    UMaterialEditingLibrary::RecompileMaterial(Material);
+    Material->PostEditChange();
+    Material->MarkPackageDirty();
+    UEditorAssetLibrary::SaveLoadedAsset(Material, false);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("material_path"), MaterialPath);
+    ResultObj->SetBoolField(TEXT("recompiled"), true);
     return ResultObj;
 }
 

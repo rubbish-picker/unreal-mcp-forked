@@ -987,4 +987,141 @@ def register_editor_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
+    @mcp.tool()
+    def inspect_material_expressions(ctx: Context, material_path: str) -> Dict[str, Any]:
+        """Inspect material graph expression nodes, pins, and links."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("inspect_material_expressions", {
+                "material_path": material_path
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error inspecting material expressions: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def add_material_expression_node(
+        ctx: Context,
+        material_path: str,
+        expression_type: str,
+        parameter_name: str = "",
+        default_value=None,
+        value=None,
+        texture_path: str = "",
+        node_x: int = 0,
+        node_y: int = 0,
+        description: str = "",
+        recompile: bool = True
+    ) -> Dict[str, Any]:
+        """Add a low-level material graph expression node."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            params = {
+                "material_path": material_path,
+                "expression_type": expression_type,
+                "node_x": node_x,
+                "node_y": node_y,
+                "recompile": recompile
+            }
+            if parameter_name:
+                params["parameter_name"] = parameter_name
+            if default_value is not None:
+                params["default_value"] = default_value
+            if value is not None:
+                params["value"] = value
+            if texture_path:
+                params["texture_path"] = texture_path
+            if description:
+                params["description"] = description
+            return unreal.send_command("add_material_expression_node", params) or {}
+        except Exception as e:
+            error_msg = f"Error adding material expression node: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def connect_material_expression_to_property(
+        ctx: Context,
+        material_path: str,
+        expression_id: str,
+        property_name: str,
+        output_name: str = "",
+        recompile: bool = True
+    ) -> Dict[str, Any]:
+        """Connect a material expression output to a material property input."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("connect_material_expression_to_property", {
+                "material_path": material_path,
+                "expression_id": expression_id,
+                "property_name": property_name,
+                "output_name": output_name,
+                "recompile": recompile
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error connecting material expression to property: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def connect_material_expressions(
+        ctx: Context,
+        material_path: str,
+        from_expression_id: str,
+        to_expression_id: str,
+        from_output_name: str = "",
+        to_input_name: str = "",
+        recompile: bool = True
+    ) -> Dict[str, Any]:
+        """Connect two material expression nodes."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("connect_material_expressions", {
+                "material_path": material_path,
+                "from_expression_id": from_expression_id,
+                "to_expression_id": to_expression_id,
+                "from_output_name": from_output_name,
+                "to_input_name": to_input_name,
+                "recompile": recompile
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error connecting material expressions: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def recompile_material(ctx: Context, material_path: str) -> Dict[str, Any]:
+        """Recompile and save a Material asset after graph edits."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+            return unreal.send_command("recompile_material", {
+                "material_path": material_path
+            }) or {}
+        except Exception as e:
+            error_msg = f"Error recompiling material: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
     logger.info("Editor tools registered successfully")

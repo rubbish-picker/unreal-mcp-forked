@@ -126,6 +126,11 @@ TSharedPtr<FJsonObject> UUnrealMCPBridge::GetCommandCatalog() const
     Commands.Add(MakeCommand(TEXT("set_material_parameter"), TEXT("editor"), TEXT("Set scalar or vector parameters on a Material or MaterialInstanceConstant.")));
     Commands.Add(MakeCommand(TEXT("set_material_texture_parameter"), TEXT("editor"), TEXT("Set a texture parameter on a Material or MaterialInstanceConstant.")));
     Commands.Add(MakeCommand(TEXT("set_material_static_switch_parameter"), TEXT("editor"), TEXT("Set a static switch parameter on a Material or MaterialInstance.")));
+    Commands.Add(MakeCommand(TEXT("inspect_material_expressions"), TEXT("editor"), TEXT("Inspect material graph expression nodes, pins, and links.")));
+    Commands.Add(MakeCommand(TEXT("add_material_expression_node"), TEXT("editor"), TEXT("Add a low-level material graph expression node.")));
+    Commands.Add(MakeCommand(TEXT("connect_material_expression_to_property"), TEXT("editor"), TEXT("Connect a material expression output to a material property input.")));
+    Commands.Add(MakeCommand(TEXT("connect_material_expressions"), TEXT("editor"), TEXT("Connect two material expression nodes.")));
+    Commands.Add(MakeCommand(TEXT("recompile_material"), TEXT("editor"), TEXT("Recompile and save a Material asset after graph edits.")));
     Commands.Add(MakeCommand(TEXT("spawn_blueprint_actor"), TEXT("editor"), TEXT("Spawn an actor from a Blueprint.")));
     Commands.Add(MakeCommand(TEXT("open_level"), TEXT("editor"), TEXT("Open an editor level by package path or filename.")));
     Commands.Add(MakeCommand(TEXT("save_current_level"), TEXT("editor"), TEXT("Save the currently open editor level.")));
@@ -358,6 +363,11 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("set_material_parameter") ||
                      CommandType == TEXT("set_material_texture_parameter") ||
                      CommandType == TEXT("set_material_static_switch_parameter") ||
+                     CommandType == TEXT("inspect_material_expressions") ||
+                     CommandType == TEXT("add_material_expression_node") ||
+                     CommandType == TEXT("connect_material_expression_to_property") ||
+                     CommandType == TEXT("connect_material_expressions") ||
+                     CommandType == TEXT("recompile_material") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
                      CommandType == TEXT("open_level") ||
                      CommandType == TEXT("save_current_level") ||
