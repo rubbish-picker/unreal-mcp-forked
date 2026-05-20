@@ -507,5 +507,78 @@ def register_blueprint_node_tools(mcp: FastMCP):
             error_msg = f"Error removing blueprint nodes: {e}"
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def remove_blueprint_component_and_linked_nodes(
+        ctx: Context,
+        blueprint_name: str,
+        component_name: str
+    ) -> Dict[str, Any]:
+        """
+        Remove a component template and directly linked generated nodes.
+
+        Args:
+            blueprint_name: Name or path of the target Blueprint
+            component_name: Name of the component template to remove
+
+        Returns:
+            Response containing removed component and graph node counts
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("remove_blueprint_component_and_linked_nodes", {
+                "blueprint_name": blueprint_name,
+                "component_name": component_name
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error removing blueprint component and linked nodes: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
+    def remove_blueprint_actor_overlap_nodes(
+        ctx: Context,
+        blueprint_name: str,
+        begin_event_name: str = "ReceiveActorBeginOverlap",
+        end_event_name: str = "ReceiveActorEndOverlap"
+    ) -> Dict[str, Any]:
+        """
+        Remove legacy actor overlap door chains.
+
+        Args:
+            blueprint_name: Name or path of the target Blueprint
+            begin_event_name: Begin overlap event name to remove
+            end_event_name: End overlap event name to remove
+
+        Returns:
+            Response containing removed event/call/node counts
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("remove_blueprint_actor_overlap_nodes", {
+                "blueprint_name": blueprint_name,
+                "begin_event_name": begin_event_name,
+                "end_event_name": end_event_name
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error removing blueprint actor overlap nodes: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
     
     logger.info("Blueprint node tools registered successfully")

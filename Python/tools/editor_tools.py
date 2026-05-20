@@ -15,6 +15,25 @@ def register_editor_tools(mcp: FastMCP):
     """Register editor tools with the MCP server."""
 
     @mcp.tool()
+    def ping_unreal_mcp(ctx: Context) -> Dict[str, Any]:
+        """Check whether the Unreal-side MCP bridge is alive."""
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("ping", {})
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error pinging Unreal MCP bridge: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    @mcp.tool()
     def list_unreal_mcp_commands(ctx: Context) -> Dict[str, Any]:
         """
         List commands supported by the Unreal-side MCP bridge.
@@ -92,8 +111,20 @@ def register_editor_tools(mcp: FastMCP):
             
             if not response:
                 return []
-                
-            return response.get("actors", [])
+
+            if "result" in response and "actors" in response["result"]:
+                actors = response["result"]["actors"]
+            elif "actors" in response:
+                actors = response["actors"]
+            else:
+                logger.warning(f"Unexpected response format: {response}")
+                return []
+
+            return [
+                actor.get("name", "")
+                for actor in actors
+                if isinstance(actor, dict) and actor.get("name")
+            ]
             
         except Exception as e:
             logger.error(f"Error finding actors: {e}")
@@ -283,7 +314,7 @@ def register_editor_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
-    # @mcp.tool() commented out because it's buggy
+    @mcp.tool()
     def focus_viewport(
         ctx: Context,
         target: str = None,
@@ -329,6 +360,38 @@ def register_editor_tools(mcp: FastMCP):
         except Exception as e:
             logger.error(f"Error focusing viewport: {e}")
             return {"status": "error", "message": str(e)}
+
+    @mcp.tool()
+    def take_screenshot(
+        ctx: Context,
+        filepath: str
+    ) -> Dict[str, Any]:
+        """
+        Capture the active editor viewport to a PNG file.
+
+        Args:
+            filepath: Output path for the PNG. ".png" is appended by Unreal if omitted.
+
+        Returns:
+            Response containing the saved filepath or an error
+        """
+        from unreal_mcp_server import get_unreal_connection
+
+        try:
+            unreal = get_unreal_connection()
+            if not unreal:
+                logger.error("Failed to connect to Unreal Engine")
+                return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+            response = unreal.send_command("take_screenshot", {
+                "filepath": filepath
+            })
+            return response or {}
+
+        except Exception as e:
+            error_msg = f"Error taking screenshot: {e}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
 
     @mcp.tool()
     def spawn_blueprint_actor(

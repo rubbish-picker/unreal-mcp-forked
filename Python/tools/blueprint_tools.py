@@ -330,7 +330,7 @@ def register_blueprint_tools(mcp: FastMCP):
             logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
-    # @mcp.tool() commented out, just use set_component_property instead
+    @mcp.tool()
     def set_pawn_properties(
         ctx: Context,
         blueprint_name: str,
@@ -382,35 +382,16 @@ def register_blueprint_tools(mcp: FastMCP):
                 logger.warning("No properties specified to set")
                 return {"success": True, "message": "No properties specified to set", "results": {}}
             
-            # Set each property using the generic set_blueprint_property function
-            results = {}
-            overall_success = True
-            
-            for prop_name, prop_value in properties.items():
-                params = {
-                    "blueprint_name": blueprint_name,
-                    "property_name": prop_name,
-                    "property_value": prop_value
-                }
-                
-                logger.info(f"Setting pawn property {prop_name} to {prop_value}")
-                response = unreal.send_command("set_blueprint_property", params)
-                
-                if not response:
-                    logger.error(f"No response from Unreal Engine for property {prop_name}")
-                    results[prop_name] = {"success": False, "message": "No response from Unreal Engine"}
-                    overall_success = False
-                    continue
-                
-                results[prop_name] = response
-                if not response.get("success", False):
-                    overall_success = False
-            
-            return {
-                "success": overall_success,
-                "message": "Pawn properties set" if overall_success else "Some pawn properties failed to set",
-                "results": results
-            }
+            params = {"blueprint_name": blueprint_name}
+            params.update(properties)
+
+            logger.info(f"Setting pawn properties with params: {params}")
+            response = unreal.send_command("set_pawn_properties", params)
+            if not response:
+                logger.error("No response from Unreal Engine")
+                return {"success": False, "message": "No response from Unreal Engine"}
+
+            return response
             
         except Exception as e:
             error_msg = f"Error setting pawn properties: {e}"
