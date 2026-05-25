@@ -216,6 +216,21 @@ UClass* FUnrealMCPCommonUtils::FindClassByName(const FString& ClassName)
         return nullptr;
     }
 
+    const auto NormalizeClassName = [](const FString& InName)
+    {
+        FString Result = InName;
+        Result.ReplaceInline(TEXT("REINST_"), TEXT(""));
+        Result.ReplaceInline(TEXT("HOTRELOADED_"), TEXT(""));
+        Result.ReplaceInline(TEXT("SKEL_"), TEXT(""));
+        if (Result.EndsWith(TEXT("_C")))
+        {
+            Result.LeftChopInline(2);
+        }
+        return Result;
+    };
+
+    const FString NormalizedClassName = NormalizeClassName(ClassName);
+
     if (UClass* LoadedClass = LoadObject<UClass>(nullptr, *ClassName))
     {
         return LoadedClass;
@@ -232,6 +247,8 @@ UClass* FUnrealMCPCommonUtils::FindClassByName(const FString& ClassName)
         ShortName = ShortName.Mid(SeparatorIndex + 1);
     }
 
+    const FString NormalizedShortName = NormalizeClassName(ShortName);
+
     for (TObjectIterator<UClass> It; It; ++It)
     {
         UClass* CandidateClass = *It;
@@ -240,9 +257,11 @@ UClass* FUnrealMCPCommonUtils::FindClassByName(const FString& ClassName)
             continue;
         }
 
-        if (CandidateClass->GetName() == ClassName ||
-            CandidateClass->GetName() == ShortName ||
-            CandidateClass->GetPathName() == ClassName)
+        const FString CandidateName = NormalizeClassName(CandidateClass->GetName());
+        const FString CandidatePath = NormalizeClassName(CandidateClass->GetPathName());
+        if (CandidateName.Equals(NormalizedClassName, ESearchCase::IgnoreCase) ||
+            CandidateName.Equals(NormalizedShortName, ESearchCase::IgnoreCase) ||
+            CandidatePath.Equals(NormalizedClassName, ESearchCase::IgnoreCase))
         {
             return CandidateClass;
         }

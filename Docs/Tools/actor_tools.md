@@ -34,7 +34,7 @@ Find actors in the current level by name pattern.
 - `pattern` (string) - The name or partial name pattern to search for
 
 **Returns:**
-- List of matching actor names
+- List of matching actor objects
 
 **Example:**
 ```json
@@ -153,7 +153,7 @@ All command responses include a "success" field indicating whether the operation
 ## Implementation Notes
 
 - All numeric parameters for transforms (location, rotation, scale) must be provided as lists of 3 float values
-- Actor types should be provided in uppercase
+- Actor types can be provided as engine names, project class names, or full class paths
 - The server maintains logging of all operations with detailed information and error messages
 - All commands are executed through a connection to the Unreal Engine editor
 

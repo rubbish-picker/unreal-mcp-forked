@@ -7,6 +7,7 @@
 #include "HighResScreenshot.h"
 #include "Engine/GameViewportClient.h"
 #include "Misc/FileHelper.h"
+#include "Misc/App.h"
 #include "GameFramework/Actor.h"
 #include "Engine/Selection.h"
 #include "Kismet/GameplayStatics.h"
@@ -39,6 +40,7 @@
 #include "Factories/MaterialInstanceConstantFactoryNew.h"
 #include "Factories/TextureFactory.h"
 #include "UObject/ObjectRedirector.h"
+#include "UObject/UObjectIterator.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/Texture2D.h"
@@ -373,7 +375,87 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnActor(const TShared
     }
     else
     {
-        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown actor type: %s"), *ActorType));
+        TArray<FString> TypeCandidates;
+        TypeCandidates.Add(ActorType);
+        if (ActorType.StartsWith(TEXT("A")) && ActorType.Len() > 1)
+        {
+            TypeCandidates.Add(ActorType.RightChop(1));
+        }
+        else
+        {
+            TypeCandidates.Add(TEXT("A") + ActorType);
+        }
+
+        TArray<FString> ClassPaths;
+        const FString ProjectModuleName = FApp::GetProjectName();
+        for (const FString& Candidate : TypeCandidates)
+        {
+            if (Candidate.StartsWith(TEXT("/Script/")))
+            {
+                ClassPaths.Add(Candidate);
+            }
+            else
+            {
+                ClassPaths.Add(FString::Printf(TEXT("/Script/Engine.%s"), *Candidate));
+                ClassPaths.Add(FString::Printf(TEXT("/Script/%s.%s"), *ProjectModuleName, *Candidate));
+                ClassPaths.Add(FString::Printf(TEXT("/Script/gameproject.%s"), *Candidate));
+            }
+        }
+
+        UClass* ActorClass = nullptr;
+        for (const FString& ClassPath : ClassPaths)
+        {
+            ActorClass = LoadClass<AActor>(nullptr, *ClassPath);
+            if (ActorClass && ActorClass->IsChildOf(AActor::StaticClass()))
+            {
+                break;
+            }
+            ActorClass = nullptr;
+        }
+
+        if (!ActorClass)
+        {
+            const auto NormalizeClassName = [](const FString& InName)
+            {
+                FString Result = InName;
+                Result.ReplaceInline(TEXT("REINST_"), TEXT(""));
+                Result.ReplaceInline(TEXT("HOTRELOADED_"), TEXT(""));
+                Result.ReplaceInline(TEXT("SKEL_"), TEXT(""));
+                if (Result.EndsWith(TEXT("_C")))
+                {
+                    Result.LeftChopInline(2);
+                }
+                return Result;
+            };
+
+            const FString NormalizedActorType = NormalizeClassName(ActorType);
+            for (TObjectIterator<UClass> ClassIt; ClassIt; ++ClassIt)
+            {
+                UClass* CandidateClass = *ClassIt;
+                if (!CandidateClass || !CandidateClass->IsChildOf(AActor::StaticClass()) || CandidateClass->HasAnyClassFlags(CLASS_Abstract))
+                {
+                    continue;
+                }
+
+                const FString CandidateName = NormalizeClassName(CandidateClass->GetName());
+                const FString CandidateNameWithoutPrefix = CandidateName.StartsWith(TEXT("A"), ESearchCase::CaseSensitive) ? CandidateName.RightChop(1) : CandidateName;
+                if (CandidateName.Equals(NormalizedActorType, ESearchCase::IgnoreCase) ||
+                    CandidateNameWithoutPrefix.Equals(NormalizedActorType, ESearchCase::IgnoreCase))
+                {
+                    ActorClass = CandidateClass;
+                    UE_LOG(LogTemp, Display, TEXT("Resolved actor type '%s' to loaded class '%s' via case-insensitive scan"), *ActorType, *CandidateClass->GetPathName());
+                    break;
+                }
+            }
+        }
+
+        if (!ActorClass)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Failed to resolve actor type '%s' after scanning loaded actor classes"), *ActorType);
+            return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown actor type: %s"), *ActorType));
+        }
+
+        NewActor = World->SpawnActor<AActor>(ActorClass, Location, Rotation, SpawnParams);
     }
 
     if (NewActor)

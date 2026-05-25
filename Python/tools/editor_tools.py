@@ -95,7 +95,7 @@ def register_editor_tools(mcp: FastMCP):
             return []
 
     @mcp.tool()
-    def find_actors_by_name(ctx: Context, pattern: str) -> List[str]:
+    def find_actors_by_name(ctx: Context, pattern: str) -> List[Dict[str, Any]]:
         """Find actors by name pattern."""
         from unreal_mcp_server import get_unreal_connection
         
@@ -121,7 +121,7 @@ def register_editor_tools(mcp: FastMCP):
                 return []
 
             return [
-                actor.get("name", "")
+                actor
                 for actor in actors
                 if isinstance(actor, dict) and actor.get("name")
             ]
@@ -161,7 +161,7 @@ def register_editor_tools(mcp: FastMCP):
             # Ensure all parameters are properly formatted
             params = {
                 "name": name,
-                "type": type.upper(),  # Make sure type is uppercase
+                "type": type,
                 "location": location,
                 "rotation": rotation
             }

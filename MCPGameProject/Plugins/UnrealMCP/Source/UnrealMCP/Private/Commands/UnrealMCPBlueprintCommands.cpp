@@ -22,11 +22,14 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
 #include "Engine/TimelineTemplate.h"
 #include "Engine/SkeletalMesh.h"
 #include "Curves/CurveFloat.h"
 #include "Curves/CurveVector.h"
 #include "Curves/CurveLinearColor.h"
+#include "Misc/App.h"
+#include "Misc/PackageName.h"
 
 static TSharedPtr<FJsonObject> RichCurveToJsonObject(const FRichCurve& Curve)
 {
@@ -130,12 +133,35 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCreateBlueprint(const
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'name' parameter"));
     }
 
-    // Check if blueprint already exists
-    FString PackagePath = TEXT("/Game/Blueprints/");
-    FString AssetName = BlueprintName;
-    if (UEditorAssetLibrary::DoesAssetExist(PackagePath + AssetName))
+    BlueprintName.ReplaceInline(TEXT("\\"), TEXT("/"));
+    BlueprintName.TrimStartAndEndInline();
+
+    FString LongPackageName;
+    if (BlueprintName.StartsWith(TEXT("/Game/")))
     {
-        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint already exists: %s"), *BlueprintName));
+        LongPackageName = BlueprintName;
+    }
+    else if (BlueprintName.Contains(TEXT("/")))
+    {
+        LongPackageName = FString::Printf(TEXT("/Game/%s"), *BlueprintName);
+    }
+    else
+    {
+        LongPackageName = FString::Printf(TEXT("/Game/Blueprints/%s"), *BlueprintName);
+    }
+
+    LongPackageName.ReplaceInline(TEXT("//"), TEXT("/"));
+    const FString AssetName = FPackageName::GetLongPackageAssetName(LongPackageName);
+    const FString PackagePath = FPackageName::GetLongPackagePath(LongPackageName);
+    if (AssetName.IsEmpty() || !FPackageName::IsValidLongPackageName(LongPackageName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Invalid blueprint asset path: %s"), *BlueprintName));
+    }
+
+    const FString ObjectPath = FString::Printf(TEXT("%s.%s"), *LongPackageName, *AssetName);
+    if (UEditorAssetLibrary::DoesAssetExist(ObjectPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint already exists: %s"), *ObjectPath));
     }
 
     // Create the blueprint factory
@@ -152,32 +178,58 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCreateBlueprint(const
     if (!ParentClass.IsEmpty())
     {
         FString ClassName = ParentClass;
-        if (!ClassName.StartsWith(TEXT("A")))
-        {
-            ClassName = TEXT("A") + ClassName;
-        }
+        ClassName.TrimStartAndEndInline();
         
         // First try direct StaticClass lookup for common classes
         UClass* FoundClass = nullptr;
-        if (ClassName == TEXT("APawn"))
+        if (ClassName == TEXT("Pawn") || ClassName == TEXT("APawn"))
         {
             FoundClass = APawn::StaticClass();
         }
-        else if (ClassName == TEXT("AActor"))
+        else if (ClassName == TEXT("Actor") || ClassName == TEXT("AActor"))
         {
             FoundClass = AActor::StaticClass();
         }
+        else if (ClassName == TEXT("Character") || ClassName == TEXT("ACharacter"))
+        {
+            FoundClass = ACharacter::StaticClass();
+        }
         else
         {
-            // Try loading the class using LoadClass which is more reliable than FindObject
-            const FString ClassPath = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
-            FoundClass = LoadClass<AActor>(nullptr, *ClassPath);
-            
-            if (!FoundClass)
+            TArray<FString> ClassCandidates;
+            ClassCandidates.Add(ClassName);
+            if (ClassName.StartsWith(TEXT("A")) && ClassName.Len() > 1)
             {
-                // Try alternate paths if not found
-                const FString GameClassPath = FString::Printf(TEXT("/Script/Game.%s"), *ClassName);
-                FoundClass = LoadClass<AActor>(nullptr, *GameClassPath);
+                ClassCandidates.Add(ClassName.RightChop(1));
+            }
+            else
+            {
+                ClassCandidates.Add(TEXT("A") + ClassName);
+            }
+
+            const FString ProjectModuleName = FApp::GetProjectName();
+            TArray<FString> ClassPaths;
+            for (const FString& Candidate : ClassCandidates)
+            {
+                if (Candidate.StartsWith(TEXT("/Script/")))
+                {
+                    ClassPaths.Add(Candidate);
+                }
+                else
+                {
+                    ClassPaths.Add(FString::Printf(TEXT("/Script/Engine.%s"), *Candidate));
+                    ClassPaths.Add(FString::Printf(TEXT("/Script/%s.%s"), *ProjectModuleName, *Candidate));
+                    ClassPaths.Add(FString::Printf(TEXT("/Script/gameproject.%s"), *Candidate));
+                }
+            }
+
+            for (const FString& ClassPath : ClassPaths)
+            {
+                FoundClass = LoadClass<AActor>(nullptr, *ClassPath);
+                if (FoundClass)
+                {
+                    break;
+                }
             }
         }
 
@@ -188,15 +240,14 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCreateBlueprint(const
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("Could not find specified parent class '%s' at paths: /Script/Engine.%s or /Script/Game.%s, defaulting to AActor"), 
-                *ClassName, *ClassName, *ClassName);
+            UE_LOG(LogTemp, Warning, TEXT("Could not find specified parent class '%s', defaulting to AActor"), *ClassName);
         }
     }
     
     Factory->ParentClass = SelectedParentClass;
 
     // Create the blueprint
-    UPackage* Package = CreatePackage(*(PackagePath + AssetName));
+    UPackage* Package = CreatePackage(*LongPackageName);
     UBlueprint* NewBlueprint = Cast<UBlueprint>(Factory->FactoryCreateNew(UBlueprint::StaticClass(), Package, *AssetName, RF_Standalone | RF_Public, nullptr, GWarn));
 
     if (NewBlueprint)
@@ -209,7 +260,8 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCreateBlueprint(const
 
         TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
         ResultObj->SetStringField(TEXT("name"), AssetName);
-        ResultObj->SetStringField(TEXT("path"), PackagePath + AssetName);
+        ResultObj->SetStringField(TEXT("path"), LongPackageName);
+        ResultObj->SetStringField(TEXT("object_path"), ObjectPath);
         return ResultObj;
     }
 
