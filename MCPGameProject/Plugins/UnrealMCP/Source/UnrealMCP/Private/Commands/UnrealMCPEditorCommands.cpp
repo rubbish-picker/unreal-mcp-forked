@@ -284,7 +284,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFindActorsByName(const T
     TArray<TSharedPtr<FJsonValue>> MatchingActors;
     for (AActor* Actor : AllActors)
     {
-        if (Actor && Actor->GetName().Contains(Pattern))
+        if (!Actor)
+        {
+            continue;
+        }
+
+        const FString ActorName = Actor->GetName();
+        const FString ActorLabel = Actor->GetActorNameOrLabel();
+        if (ActorName.Contains(*Pattern, ESearchCase::IgnoreCase) || ActorLabel.Contains(*Pattern, ESearchCase::IgnoreCase))
         {
             MatchingActors.Add(FUnrealMCPCommonUtils::ActorToJson(Actor));
         }

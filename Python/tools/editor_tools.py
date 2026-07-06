@@ -118,13 +118,16 @@ def register_editor_tools(mcp: FastMCP):
                 actors = response["actors"]
             else:
                 logger.warning(f"Unexpected response format: {response}")
-                return []
+                return [{"status": "error", "message": "Unexpected response format", "response": response}]
 
-            return [
+            matches = [
                 actor
                 for actor in actors
                 if isinstance(actor, dict) and actor.get("name")
             ]
+            if not matches:
+                return [{"status": "success", "message": f"No actors matched pattern: {pattern}", "actors": []}]
+            return matches
             
         except Exception as e:
             logger.error(f"Error finding actors: {e}")
